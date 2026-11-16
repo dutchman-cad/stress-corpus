@@ -38,6 +38,16 @@ To propose a new value (or a new axis), open an issue titled "Axis: <name>" with
 
 You can do either or both. Say which in the results.
 
+## Scripts for SolidCraft
+
+`scripts.py` writes the machine-runnable form of each item. It uses `gen.py`'s own numbers, so a script builds what its brief prints, and it leaves `items.jsonl` untouched. Each JSON line has `id`, `script` (a `solidcraft-cli` command script), `unsupported` (why there is no script yet) and `expected`.
+
+- `python3 scripts.py --pairwise` writes `scripts-pairwise.jsonl`, the 196 all-pairs items. That sample is committed. `python3 scripts.py` writes `scripts.jsonl` for every item; generate it locally when you need it.
+- Run one with `solidcraft-cli run script.json --param-check strict`. A malformed script fails as a parameter error, so a generator mistake can't pass for a kernel bug.
+- `expected.bodies` is the number of solid bodies at the end. `expected.volume_mm3` is exact where every step adds or removes a solid with a closed-form volume (primitives, holes and patterns of holes wholly inside their face, bosses, pads, a moved planar face, a split); otherwise it is `null`.
+- `python3 scripts.py --check path/to/solidcraft-cli [N] [--jobs J] [--in FILE]` runs the first N scripts of FILE (`scripts.jsonl` by default, all of them), J at a time (4 by default). It writes `check.jsonl`: per item, `built`, `wrong-result` (bodies or volume differ from `expected`), `failed` (with the first error line) or `hang`.
+- Items without a script still need building by hand from the brief. This first version covers the steps that map straight onto SolidCraft commands. It doesn't yet cover spline outlines, sheet metal, sweeps, lofts, revolves, variable fillets, patterns along a path, rotated pads, or a fillet or chamfer of a loop that an earlier step splits.
+
 ## Record results
 
 Add a pull request with `results/<batch>.jsonl` (for example `results/batch-07.jsonl`). One line per item and pipeline:
