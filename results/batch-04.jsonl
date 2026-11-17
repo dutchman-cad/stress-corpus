@@ -95,6 +95,6 @@
 {"id": "S0395", "pipeline": "solidcraft", "outcome": "correct", "version": "solidcraft-cli 0.43.0", "link": ""}
 {"id": "S0396", "pipeline": "solidcraft", "outcome": "skipped", "version": "solidcraft-cli 0.43.0", "link": ""}
 {"id": "S0397", "pipeline": "solidcraft", "outcome": "skipped", "version": "solidcraft-cli 0.43.0", "link": ""}
-{"id": "S0398", "pipeline": "solidcraft", "outcome": "wrong-refusal", "version": "solidcraft-cli 0.43.0", "link": "https://github.com/dutchman-cad/stress-corpus/issues/106"}
+{"id": "S0398", "pipeline": "solidcraft", "outcome": "correct", "version": "solidcraft-cli 0.43.0", "link": ""}
 {"id": "S0399", "pipeline": "solidcraft", "outcome": "skipped", "version": "solidcraft-cli 0.43.0", "link": ""}
 {"id": "S0400", "pipeline": "solidcraft", "outcome": "skipped", "version": "solidcraft-cli 0.43.0", "link": ""}
