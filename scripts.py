@@ -641,6 +641,26 @@ def signature(text):
     return "%s @ solidcraft-cli run" % (first_error(text) or "no message")
 
 
+def hang_step(cli, tmp, r):
+    """The command a hung script was running when its time ran out. The CLI prints nothing until it
+    finishes, so bisect on prefixes of the script: a prefix that hangs makes every longer one hang, so
+    the shortest prefix that hangs ends in that command (about log2(commands) runs)."""
+    cmds = r["script"].get("commands") or []
+    path = os.path.join(tmp, r["id"] + ".prefix.json")
+    done, hung = 0, len(cmds)  # the empty prefix finishes; the whole script hung
+    while hung - done > 1:
+        mid = (done + hung) // 2
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dict(r["script"], commands=cmds[:mid]), f)
+        try:
+            subprocess.run([cli, "run", path, "--param-check", "strict"], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
+            done = mid
+        except subprocess.TimeoutExpired:
+            hung = mid
+    return cmds[hung - 1].get("command") if cmds else None
+
+
 def check_one(cli, tmp, r):
     """One item through the CLI, as one of the README's outcomes."""
     exp = r["expected"] or {}
@@ -653,8 +673,9 @@ def check_one(cli, tmp, r):
         p = subprocess.run([cli, "run", path, "--param-check", "strict"], capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        return {"id": r["id"], "outcome": "hang", "detail": "no result in %d s" % TIMEOUT_S,
-                "signature": "no result in %d s @ the whole script" % TIMEOUT_S}
+        step = hang_step(cli, tmp, r) or "the whole script"
+        return {"id": r["id"], "outcome": "hang", "detail": "no result in %d s, running %s" % (TIMEOUT_S, step),
+                "signature": "no result in %d s @ %s" % (TIMEOUT_S, step)}
     text = p.stderr + p.stdout
     if p.returncode != 0:
         if "panick" in text.lower() or p.returncode not in (1, 2):
