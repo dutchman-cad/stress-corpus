@@ -69,8 +69,6 @@ class Item:
 def body(it, su, sc):
     """The base body, and its frame: the face's plane z and outward direction o (+1 up, -1 down),
     the face centre C, hu, H, the face's outer loop picks (off every seam and feature)."""
-    if su == "spline":
-        raise Unsupported("spline outline (needs a sketch spline)")
     b = gen.body(su, sc, False, None)
     fr = {"o": 1.0, "cx": 0.0, "cy": 0.0, "hu": b["hu"], "H": b["H"], "Wmin": b["Wmin"], "z0": b["z0"]}
     if su == "plane":
@@ -121,6 +119,25 @@ def body(it, su, sc):
         # the flat face is at Z = 0 with the body above it, so features on it point down
         fr.update(fz=0.0, o=-1.0, cx=Rm, loop=[[0.0, -(Rm - r), 0.0], [0.0, -(Rm + r), 0.0]],
                   ext0=Rm + r, rim=Rm + r, bbox_c=[0.0, 0.0, r / 2], sides=None)
+    elif su == "spline":
+        # gen.spline_text: a periodic cubic spline through 8 points, extruded H from Z = 0
+        A, B, H = {"tiny": (4, 3, 2), "normal": (60, 40, 25), "huge": (2400, 1600, 1000),
+                   "extreme ratio": (1000, 200, 1)}[sc]
+        H = f3(H)
+        pts = []
+        for k in range(8):
+            th = k * math.pi / 4
+            f = 1 + 0.1 * math.sin(3 * th)
+            pts.append([f3(0.5 * A * f * math.cos(th)), f3(0.5 * B * f * math.sin(th))])
+        it.add("sketch.create", name="Outline", plane={"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]})
+        it.add("sketch.spline.fit_point", periodic=True, points=pts)
+        it.add("sketch.finish")
+        it.add("solid.extrude", sketch="Outline", distance=H, operation="new", body_name=PART)
+        # the -Y outline point (270 deg) and the +X point (0 deg) are on the curve; the bounding box
+        # centre is not closed form, so a sphere at it is not scripted
+        py = pts[6][1]
+        fr.update(fz=H, loop=[[0.0, py, H]], ext0=pts[0][0], sides=[[0.0, py, H / 2]],
+                  edge_py=None, rim=None, bbox_c=None)
     return fr
 
 
@@ -265,6 +282,8 @@ def op_step(it, op, su, sc, fr, e, to):
             it.add("solid.sphere", center=[cx, cy, fz], radius=f3(1.2 * fr["Wmin"]) / 2,
                    operation="intersect", targets=[PART])
         else:
+            if fr["bbox_c"] is None:
+                raise Unsupported("sphere at the bounding-box centre of a spline body")
             rad = f3(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2)) / 2
             it.add("solid.sphere", center=fr["bbox_c"], radius=rad, operation="intersect", targets=[PART])
     elif op == "thread":
