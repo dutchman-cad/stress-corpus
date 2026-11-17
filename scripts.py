@@ -241,6 +241,43 @@ def op_step(it, op, su, sc, fr, e, to):
     w = f3(gen.sig(0.05 * e))
     c = f3(gen.sig(0.05 * e))
     p = f3(gen.sig(0.15 * e))
+    def sketch(o, x, y):
+        name = it.name("Sketch")
+        it.add("sketch.create", name=name, plane={"origin": o, "x_dir": x, "y_dir": y})
+        return name
+
+    if op == "revolve":
+        # a g x g square in the vertical plane through C, its centre 1.5 d from the vertical axis through
+        # C, against the face on the material's side, turned 360 deg about that axis: a ring groove
+        g, R = f3(gen.sig(0.04 * e)), f3(1.5 * d)
+        sq = sketch([cx, cy, fz], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+        it.add("sketch.rectangle.two_point", p0=[R - g / 2, -g if out else 0.0], p1=[R + g / 2, 0.0 if out else g])
+        it.add("sketch.finish")
+        it.add("solid.revolve", sketch=sq, axis={"origin": [cx, cy, fz], "dir": [0.0, 0.0, 1.0]}, angle="360 deg",
+               operation="cut", targets=[PART])
+        return
+    if op == "sweep":
+        # a circle of d at C, along a 90 deg arc of radius 3 d leaving C straight up (+Z) and ending toward +Y
+        prof = sketch([cx, cy, fz], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        it.add("sketch.circle.center", center=[0.0, 0.0], radius=d / 2)
+        it.add("sketch.finish")
+        path = sketch([cx, cy, fz], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])
+        R = f3(3 * d)
+        it.add("sketch.arc.center_point", center=[R, 0.0], start=[R, R], end=[0.0, 0.0], id="arc")  # counter-clockwise
+        it.add("sketch.finish")
+        it.add("solid.sweep", sketch=prof, path_sketch=path, path=["arc"], orientation="perpendicular",
+               operation="join", targets=[PART])
+        return
+    if op == "loft":
+        # a d x d square at C to a circle of d on the plane dep above it (+Z)
+        s0 = sketch([cx, cy, fz], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        it.add("sketch.rectangle.two_point", p0=[-d / 2, -d / 2], p1=[d / 2, d / 2])
+        it.add("sketch.finish")
+        s1 = sketch([cx, cy, fz + dep], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        it.add("sketch.circle.center", center=[0.0, 0.0], radius=d / 2)
+        it.add("sketch.finish")
+        it.add("solid.loft", sections=[{"sketch": s0}, {"sketch": s1}], operation="join", targets=[PART])
+        return
     if op == "extrude":
         cyl(it, d / 2, dep, cx, cy, fz, True, "join")  # the brief says "upward" for every face
     elif op == "cut":
