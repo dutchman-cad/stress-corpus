@@ -1,0 +1,76 @@
+name: Check results
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tool tests
+        run: python3 -m unittest discover -s tests
+      - name: Check results files
+        run: |
+          python3 tools/check_results.py | tee check.txt
+          python3 - <<'PY'
+          import re
+          for line in open("check.txt"):
+              m = re.match(r"error: (.+?):(\d+): (.*)", line)
+              if m:
+                  print(f"::error file={m[1]},line={m[2]}::{m[3]}")
+          PY
+          ! grep -q '^error:' check.txt
+
+  scope:
+    # A results PR only adds results lines for a batch its author holds, and never carries design files.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({ ...context.repo, username: author }).catch(() => ({ data: { permission: 'none' } }));
+            const maintainer = ['admin', 'maintain', 'write'].includes(perm.permission);
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: pr.number });
+            const errors = [];
+            const banned = /\.(f3d|f3z|ipt|iam|sldprt|sldasm|step|stp|igs|iges|sc|stl|3mf|obj|zip|png|jpe?g|gif|webp|mp4|mov)$/i;
+            for (const f of files) {
+              if (banned.test(f.filename)) errors.push(`${f.filename}: design files, exports and images stay private; results are text only.`);
+              if (!maintainer && !/^results\/batch-\d{2,3}\.jsonl$/.test(f.filename)) errors.push(`${f.filename}: a results PR only changes results/batch-NN.jsonl.`);
+            }
+            for (const f of files.filter((f) => /^results\/batch-\d{2,3}\.jsonl$/.test(f.filename))) {
+              const nn = parseInt(f.filename.match(/batch-(\d+)/)[1], 10);
+              const { data: found } = await github.rest.search.issuesAndPullRequests({ q: `repo:${context.repo.owner}/${context.repo.repo} is:issue label:batch in:title "Batch ${String(nn).padStart(2, '0')}:"` });
+              const issue = found.items[0];
+              if (!issue) { errors.push(`${f.filename}: no batch issue ${nn}.`); continue; }
+              const holders = issue.assignees.map((a) => a.login);
+              // Someone who held the batch may still send results for it after /unclaim hands back the rest.
+              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, { ...context.repo, issue_number: issue.number, per_page: 100 });
+              const heldBefore = timeline.some((e) => e.event === 'assigned' && e.assignee && e.assignee.login === author);
+              if (!maintainer && !holders.includes(author) && !heldBefore) errors.push(`${f.filename}: batch ${nn} (#${issue.number}) is claimed by ${holders.join(', ') || 'nobody'}; comment /claim on it first.`);
+              const range = issue.title.match(/S(\d+)\D+S(\d+)/);
+              const fs = require('fs');
+              if (range && fs.existsSync(f.filename)) {
+                const text = fs.readFileSync(f.filename, 'utf8');
+                text.split('\n').forEach((line, i) => {
+                  if (!line.trim()) return;
+                  let id; try { id = JSON.parse(line).id; } catch { return; }
+                  const n = parseInt(String(id).slice(1), 10);
+                  if (!(n >= +range[1] && n <= +range[2])) errors.push(`${f.filename}:${i + 1}: ${id} is not in batch ${nn} (S${range[1]}–S${range[2]}).`);
+                });
+              }
+            }
+            if (errors.length) { errors.forEach((e) => core.error(e)); core.setFailed(`${errors.length} problem(s)`); }

@@ -1,0 +1,6 @@
+{"id": "S99999", "pipeline": "solidcraft", "outcome": "correct", "version": "x"}
+{"id": "S0018", "pipeline": "blender", "outcome": "correct", "version": "x"}
+{"id": "S0018", "pipeline": "solidcraft", "outcome": "fine", "version": "x"}
+{"id": "S0019", "pipeline": "solidcraft", "outcome": "crash", "version": "x"}
+{"id": "S0018", "pipeline": "fusion-dutchman", "outcome": "correct", "version": "x", "measured": {"volume_mm3": 3297862675.7, "bodies": 1}}
+{"id": "S0019", "pipeline": "fusion-dutchman", "outcome": "wrong-result", "version": "x", "signature": "odd @ cut", "measured": {"volume_mm3": 29.9637924, "bodies": 1}}

@@ -1,6 +1,6 @@
 # Stress corpus
 
-10,000 small modelling tasks, each one a plain sentence with real millimetre sizes. Build them in SolidCraft and/or Fusion, convert with Dutchman, compare the results, and file every failure where the bug lives. The goal is to find and fix bugs.
+10,000 small modelling tasks, each one a plain sentence with real millimetre sizes. Build them in SolidCraft and/or Fusion, convert with Dutchman, compare the results, and record every failure in a results pull request. The goal is to find and fix bugs.
 
 The tasks come from what a modelling kernel has to handle, not from a list of objects: an operation, on a type of surface, in a tricky topology situation, at a given distance from the exact contact, at an unusual scale, in a particular order, and placed in an awkward spot. A few items carry an everyday object name ("Like a ring: ...") as flavour only.
 
@@ -73,8 +73,8 @@ Combinations that cannot be built (for example a sheet-metal bend on a sphere) a
 
 1. Open the issues labelled `batch`. Each is a batch of 100 items: "Batch 07: S0601–S0700".
 2. Claim one by commenting `/claim` on it (or "claiming"). A bot assigns you at once; no repo access is needed. Hold at most two open batches at a time. Comment `/unclaim` to give a batch back.
-3. Work through the items and tick each box as you finish it.
-4. Close the batch issue when every box is ticked.
+3. Work through the items. When your results PR merges, a bot ticks every item that has a result.
+4. A maintainer closes the batch when every item has a result.
 
 ## Two ways to build an item
 
@@ -109,23 +109,31 @@ Add a pull request with `results/<batch>.jsonl` (for example `results/batch-07.j
 - `pipeline`: `solidcraft` or `fusion-dutchman`
 - `outcome`: one of the outcomes above
 - `version`: the SolidCraft release or commit, or the Dutchman version, so a result can be rerun on a newer build
-- `link`: the issue or PR for a failure, empty otherwise
+- `link`: an existing issue or PR for the failure, empty otherwise
+- `signature`, `measured`, `build`: see Failures below
 
-## File failures
+**Checks on a results PR.** CI refuses a results PR that changes anything except `results/batch-NN.jsonl`, adds design files, exports or images, comes from someone who hasn't claimed that batch, lists items outside the batch, or has lines that fail `tools/check_results.py`. Each error names the file and line.
 
-Group first, then file. Many items fail for one cause, and one issue per cause is far easier to fix than one per item.
+## Failures
 
-1. Collect the failures from your batch and group them by signature: the error message (or the kind of wrong result) plus the axis values the items share.
-2. In each group, shrink to the smallest failing item: drop steps, round the dimensions, and find the boundary (for example the gap value where it starts to fail).
-3. File one issue per cause, in the repo where the bug lives, with the smallest failing item's brief and the IDs of every item in the group (for example `S0602, S0777, S4410`). Put the smallest item's ID in the title.
+Do not file bugs upstream yourself. Put every failure in your results pull request, with its `signature`. Maintainers group failures by cause and file one issue per cause, so you do not need to search other repos or shrink items.
 
-Where the bug lives:
+Add these fields to a failing line (`correct` lines may carry `measured` and `build` too):
 
-- SolidCraft could not build it or built it wrong: `tangency-labs/solidcraft`
-- Dutchman converted it wrongly: `dutchman-cad/dutchman`
-- The file reader or writer is at fault: `cadmpeg/cadmpeg`
+```json
+{"id": "S0602", "pipeline": "fusion-dutchman", "outcome": "wrong-result", "version": "dutchman 0.45.0", "build": "0.45.0", "link": "", "signature": "volume 3% low after fillet @ history replay", "measured": {"volume_mm3": 1234.5, "bodies": 1, "faces": 9, "edges": 20, "vertices": 12}}
+```
 
-Before you file, search that repo for an existing issue about the same problem (search the symptom and the operation name). If one exists, comment on it with the item IDs instead of opening a new one. Do not file `correct-refusal` results: they are expected.
+- `signature`: the first error or refusal message exactly as the program shows it, then ` @ ` and the failing operation or command. For a wrong result with no message, say in a few words what is wrong. Required for every outcome except `correct`.
+- `measured`: what you measured on the result. `volume_mm3` and `bodies` are compared with `expected`; faces, edges and vertices are optional.
+- `build`: the SolidCraft or Dutchman version.
+- `link` stays empty unless an issue already exists.
+
+A check runs on every results pull request (`python3 tools/check_results.py`). It rejects unknown IDs, outcomes or pipelines, a missing signature, a duplicate line, a `correct` whose volume or body count differs from `expected` (volume tolerance 1e-6 relative), and a `wrong-result` whose measured volume and body count match. Run it before you push.
+
+Maintainers run `python3 tools/cluster.py --known known.json`. It groups failures by pipeline and normalised signature (numbers, ids and paths removed), picks the smallest item in each group, and prints an issue draft: the brief, every item ID in the group, the axis values the group shares, and counts by version. After filing, the issue URL is added to `known.json` under the cluster's key, and that cluster is skipped from then on.
+
+If something looks odd and does not fit a results line, open an issue here and describe it. Do not file `correct-refusal` results as bugs: they are expected.
 
 ## Fusion files stay private
 

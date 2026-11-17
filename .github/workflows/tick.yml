@@ -1,0 +1,39 @@
+name: Tick finished items
+
+# When results land on main, tick each item that has a SolidCraft or Fusion -> Dutchman outcome (anything but
+# skipped) in its batch issue, so builders never need edit rights on the issue body.
+on:
+  push:
+    branches: [main]
+    paths: ["results/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const done = new Set();
+            for (const f of fs.readdirSync('results').filter((f) => /^batch-\d+\.jsonl$/.test(f))) {
+              for (const line of fs.readFileSync(`results/${f}`, 'utf8').split('\n')) {
+                if (!line.trim()) continue;
+                try { const r = JSON.parse(line); if (r.outcome && r.outcome !== 'skipped') done.add(r.id); } catch {}
+              }
+            }
+            const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, labels: 'batch', state: 'all', per_page: 100 });
+            for (const issue of issues) {
+              const body = issue.body || '';
+              const next = body.replace(/^- \[ \] (S\d{4})\b/gm, (m, id) => (done.has(id) ? `- [x] ${id}` : m));
+              if (next !== body) {
+                await github.rest.issues.update({ ...context.repo, issue_number: issue.number, body: next });
+                core.info(`ticked in #${issue.number}`);
+              }
+            }

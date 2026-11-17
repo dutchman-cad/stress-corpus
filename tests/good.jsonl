@@ -1,0 +1,5 @@
+{"id": "S0018", "pipeline": "solidcraft", "outcome": "correct", "version": "solidcraft 0.123.0", "build": "0.123.0", "link": "", "measured": {"volume_mm3": 3265212202.605285, "bodies": 1, "faces": 12}}
+{"id": "S0019", "pipeline": "solidcraft", "outcome": "correct-refusal", "version": "solidcraft 0.123.0", "link": "", "signature": "gap is below tolerance @ cut"}
+{"id": "S0058", "pipeline": "solidcraft", "outcome": "wrong-refusal", "version": "solidcraft 0.123.0", "link": "", "signature": "Fillet failed: edge 4412 not found in /tmp/a1b2/part.sc @ fillet"}
+{"id": "S0064", "pipeline": "solidcraft", "outcome": "wrong-refusal", "version": "solidcraft 0.124.0", "link": "", "signature": "Fillet failed: edge 77 not found in /home/u/x.sc @ fillet"}
+{"id": "S0090", "pipeline": "fusion-dutchman", "outcome": "wrong-result", "version": "dutchman 0.45.0", "link": "", "signature": "volume 3% low after fillet @ history replay", "measured": {"volume_mm3": 100.0, "bodies": 1, "faces": 9, "edges": 20, "vertices": 12}}
