@@ -76,6 +76,70 @@ def spline_points(A, B):
     return pts
 
 
+class PeriodicSpline:
+    """The outline as SolidCraft builds it from sketch.spline.fit_point (periodic): a C2 cubic through the
+    points, parameterised by chord length (its bounding box matches the kernel's to 1e-5 at every scale).
+    Segment i runs from point i to point i + 1, so segment 0 leaves the +X point (the seam) toward +Y."""
+
+    def __init__(self, pts):
+        n = len(pts)
+        self.p, self.h = pts, [math.dist(pts[(i + 1) % n], pts[i]) for i in range(n)]
+        self.d = [self._slopes(k) for k in range(2)]
+
+    def _slopes(self, k):
+        n, p, h = len(self.p), self.p, self.h
+        m = [[0.0] * n + [0.0] for _ in range(n)]
+        for i in range(n):
+            hp, hn = h[i - 1], h[i]
+            m[i][(i - 1) % n] += hn
+            m[i][i] += 2 * (hp + hn)
+            m[i][(i + 1) % n] += hp
+            m[i][n] = 3 * (hn * (p[i][k] - p[i - 1][k]) / hp + hp * (p[(i + 1) % n][k] - p[i][k]) / hn)
+        for c in range(n):  # Gauss-Jordan; the matrix is diagonally dominant
+            for r in range(n):
+                if r != c:
+                    f = m[r][c] / m[c][c]
+                    m[r] = [x - f * y for x, y in zip(m[r], m[c])]
+        return [m[i][n] / m[i][i] for i in range(n)]
+
+    def at(self, i, t, deriv=False):
+        n, h = len(self.p), self.h[i]
+        if deriv:
+            w = (6 * t * t - 6 * t, 3 * t * t - 4 * t + 1, -6 * t * t + 6 * t, 3 * t * t - 2 * t)
+        else:
+            w = (2 * t ** 3 - 3 * t * t + 1, t ** 3 - 2 * t * t + t, -2 * t ** 3 + 3 * t * t, t ** 3 - t * t)
+        return [w[0] * self.p[i][k] + w[1] * h * self.d[k][i] + w[2] * self.p[(i + 1) % n][k]
+                + w[3] * h * self.d[k][(i + 1) % n] for k in range(2)]
+
+    def arc(self, i, t, steps=2000):
+        """The length along segment i from its start to t (Simpson)."""
+        if t <= 0:
+            return 0.0
+        dt = t / steps
+        f = [math.hypot(*self.at(i, j * dt, True)) for j in range(steps + 1)]
+        return dt / 3 * (f[0] + f[-1] + 4 * sum(f[1:-1:2]) + 2 * sum(f[2:-1:2]))
+
+    def from_seam(self, y):
+        """The point y along the curve from the +X point toward +Y, and the outward unit normal there."""
+        lo, hi = 0.0, 1.0
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if self.arc(0, mid) < y else (lo, mid)
+        t = (lo + hi) / 2
+        q, d = self.at(0, t), self.at(0, t, True)
+        L = math.hypot(*d)
+        return q, [d[1] / L, -d[0] / L]  # counter-clockwise outline: outward is the tangent turned clockwise
+
+    def bbox_centre(self, steps=4000):
+        xs, ys = [], []
+        for i in range(len(self.p)):
+            for j in range(steps + 1):
+                x, y = self.at(i, j / steps)
+                xs.append(x)
+                ys.append(y)
+        return [(min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2]
+
+
 def sheet_body(it, su, sc, b, fr):
     """gen.body(sheet=True): a flat sheet of thickness T on Z = 0, a rule with T, K 0.44 and bend radius
     T, and the base flange from the outline (an A x B rectangle, or the spline)."""
@@ -91,7 +155,8 @@ def sheet_body(it, su, sc, b, fr):
     else:
         pts = spline_points(A, B)
         it.add("sketch.spline.fit_point", periodic=True, points=pts)
-        fr.update(loop=[[0.0, pts[6][1], T]], edge_py=pts[2][1], sides=[[0.0, pts[6][1], T / 2]])
+        fr.update(loop=[[0.0, pts[6][1], T]], edge_py=pts[2][1], sides=[[0.0, pts[6][1], T / 2]],
+                  spline=PeriodicSpline(pts))
     it.add("sketch.finish")
     it.add("sheet.flange", sketch="Base", body_name=PART)
     fr.update(fz=T, ext0=A / 2, rim=None, bbox_c=[0.0, 0.0, T / 2] if su == "plane" else None,
@@ -172,8 +237,9 @@ def body(it, su, sc, sheet=False):
         # centre is not closed form, so a sphere at it is not scripted
         py = pts[6][1]
         # the +Y outline point (90 deg) is on the curve too: the edge chain's notch is centred there
+        sp = PeriodicSpline(pts)
         fr.update(fz=H, loop=[[0.0, py, H]], ext0=pts[0][0], sides=[[0.0, py, H / 2]],
-                  edge_py=pts[2][1], rim=None, bbox_c=None)
+                  edge_py=pts[2][1], rim=None, spline=sp, bbox_c=sp.bbox_centre() + [H / 2])
     return fr
 
 
@@ -234,9 +300,15 @@ def prelude(it, to, su, sc, fr, e, g):
         # the hole breaks out (g < 0): the loop runs round its inner side
         split_loop(fr, [[cx + x - S / 2, cy, fz]] if g < 0 else [], plus_x=True)
     elif to == "feature at a seam or pole":
+        y = F(gen.fd(gen.D(s) / 2 + g))
+        if fr.get("spline"):
+            # centred on the curve y along it from the seam (the +X point); the loop runs round its inner side
+            q, nrm = fr["spline"].from_seam(y)
+            cyl(it, S / 2, dd, q[0], q[1], fz, not out, "cut")
+            split_loop(fr, [[q[0] - nrm[0] * S / 2, q[1] - nrm[1] * S / 2, fz]], plus_x=False)
+            return
         if fr["rim"] is None:
             raise Unsupported("seam notch on " + su)
-        y = F(gen.fd(gen.D(s) / 2 + g))
         th = y / fr["rim"]  # the distance is measured along the circular edge from the seam (+X)
         cyl(it, S / 2, dd, fr["rim"] * math.cos(th), fr["rim"] * math.sin(th), fz, not out, "cut")
         # the notch is centred on the edge: the loop runs round its inner side
