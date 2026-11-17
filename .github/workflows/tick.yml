@@ -7,6 +7,10 @@ on:
     branches: [main]
     paths: ["results/**"]
   workflow_dispatch:
+  # A merge by the bot's token starts no push workflows, so also run after each bot merge.
+  workflow_run:
+    workflows: ["Merge results"]
+    types: [completed]
 
 permissions:
   contents: read

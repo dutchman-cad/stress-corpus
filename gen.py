@@ -131,10 +131,12 @@ def body(surface, scale, sheet, rng):
                 "extreme ratio": (1000, 200)}[scale]
         T = TUBE_T[scale]
         if surface == "plane":
-            d["text"] = "a flat %s × %s mm sheet of thickness %s mm, centred on the origin" % (fmt(A), fmt(B), fmt(T))
+            d["text"] = ("a flat %s × %s mm sheet of thickness %s mm, centred on the origin in X and Y, "
+                         "with its bottom face on Z = 0 (it fills Z = 0 to %s mm)") % (fmt(A), fmt(B), fmt(T), fmt(T))
             d["Wmin"], d["hu"] = min(A, B), A / 2.0
         else:
-            d["text"] = "a flat sheet of thickness %s mm with a closed spline outline (see below), centred on the origin" % fmt(T)
+            d["text"] = ("a flat sheet of thickness %s mm with a closed spline outline (see below), centred on the origin in X and Y, "
+                         "with its bottom face on Z = 0 (it fills Z = 0 to %s mm)") % (fmt(T), fmt(T))
             d["Wmin"], d["hu"] = 0.8 * B, A / 2.0
             d["text"] += spline_text(A, B)
         d["H"] = T
@@ -323,8 +325,13 @@ def pattern_step(b, e):
                 fmt(d), fmt(dep), F, u, C, fmt(p), fmt(p), fmt(p)))
 
 
-def op_step(op, b, e, scale):
+# Topologies whose prelude stands pads, bosses or cylinders on the top face.
+PADS_ON_FACE = ("tangent edges", "coplanar faces", "vertex on an edge", "self-touching body")
+
+
+def op_step(op, b, e, scale, to=None, g=None):
     F, C, loop = b["F"], b["C"], b["loop"]
+    tor = b["su"] == "torus"   # its flat face faces -Z, the body is above it
     d = sig(0.1 * e)
     dep = sig(0.4 * min(b["H"], e))
     r = sig(0.07 * e)
@@ -332,7 +339,8 @@ def op_step(op, b, e, scale):
     c = sig(0.05 * e)
     p = sig(0.15 * e)
     if op == "extrude":
-        return "Extrude a Ø%s mm circle sketched at %s upward %s mm to add a boss." % (fmt(d), C, fmt(dep))
+        return "Extrude a Ø%s mm circle sketched at %s %s %s mm to add a boss." % (
+            fmt(d), C, "downward, away from the body (toward -Z)," if tor else "upward", fmt(dep))
     if op == "cut":
         return "Cut a Ø%s mm hole at %s, %s mm deep." % (fmt(d), C, fmt(dep))
     if op == "revolve":
@@ -340,11 +348,12 @@ def op_step(op, b, e, scale):
         return ("Sketch a %s × %s mm square whose centre is %s mm from the vertical axis through %s, and revolve it 360° "
                 "about that axis to cut a ring groove into the %s." % (fmt(g), fmt(g), fmt(1.5 * d), C, F))
     if op == "sweep":
-        return ("Sweep a Ø%s mm circle along a 90° arc of radius %s mm that leaves %s going straight up and ends heading toward +Y, "
-                "to add a bent tube." % (fmt(d), fmt(3 * d), C))
+        return ("Sweep a Ø%s mm circle along a 90° arc of radius %s mm that leaves %s going straight %s and ends heading toward +Y, "
+                "to add a bent tube." % (fmt(d), fmt(3 * d), C, "down, away from the body" if tor else "up"))
     if op == "loft":
-        return ("Loft a neck %s mm tall from a %s × %s mm square sketched at %s to a Ø%s mm circle on a plane %s mm above it." % (
-            fmt(dep), fmt(d), fmt(d), C, fmt(d), fmt(dep)))
+        return ("Loft a neck %s mm tall from a %s × %s mm square sketched at %s to a Ø%s mm circle on a plane %s mm %s." % (
+            fmt(dep), fmt(d), fmt(d), C, fmt(d), fmt(dep),
+            "below it (toward -Z, away from the body)" if tor else "above it"))
     if op == "shell":
         return "Hollow the body to %s mm walls, removing the %s." % (fmt(w), F)
     if op == "fillet (constant)":
@@ -371,14 +380,18 @@ def op_step(op, b, e, scale):
     if op == "boolean join":
         return "Make a separate Ø%s mm sphere centred on the %s at %s and join it to the body." % (fmt(2 * d), F, C)
     if op == "boolean cut":
-        return "Make a separate Ø%s mm cylinder, %s mm long, lying along the Y axis with its axis %s mm below the %s at %s, and subtract it from the body." % (
-            fmt(2 * d), fmt(8 * d), fmt(d / 2.0), F, C)
+        return "Make a separate Ø%s mm cylinder, %s mm long, lying along the Y axis with its axis %s mm %s at %s, and subtract it from the body." % (
+            fmt(2 * d), fmt(8 * d), fmt(d / 2.0),
+            "above the %s (inside the body)" % F if tor else "below the %s" % F, C)
     if op == "boolean intersect":
         if b["su"] == "torus":
             return ("Make a separate sphere of Ø%s mm centred on %s, and keep only the intersection of the body with it." % (
                 fmt(1.2 * b["Wmin"]), C))
+        # the sphere must reach the features, which sit up to hu from the axis and on the top face
+        reach = 1.1 * math.sqrt(b["hu"] ** 2 + (b["H"] / 2.0) ** 2)
+        dia = max(1.2 * math.sqrt(b["Wmin"] ** 2 + b["H"] ** 2), 2 * reach)
         return ("Make a separate sphere of Ø%s mm centred on the body's bounding-box centre, and keep only the intersection of the body with it." % (
-            fmt(1.2 * math.sqrt(b["Wmin"] ** 2 + b["H"] ** 2))))
+            fmt(dia)))
     if op == "thread":
         n, pi, ln = {"tiny": (1.6, 0.35, 1.6), "normal": (12, 1.75, 14), "huge": (100, 6, 120),
                      "extreme ratio": (1, 0.25, 0.5)}[scale]
@@ -399,27 +412,49 @@ def op_step(op, b, e, scale):
         z = sig(b["z0"] + 0.5 * b["H"], 4)
         return "Split the body with the plane Z = %s mm into two bodies and keep both." % fmt(z)
     if op == "offset face":
+        if to in PADS_ON_FACE:
+            dep = sig(0.5 * sig(0.12 * e))   # half the pad height: the pads stay proud of the moved face
         return "Offset the %s outward by %s mm (move the face along its normal, keeping the side faces connected)." % (F, fmt(dep))
     raise ValueError(op)
 
 
-def order_before(order, b, e):
+def fillet_r(op, which, e):
+    """Radius of the loop fillet an order step adds. which is "first" (the fillet is
+    done before the operation) or "last". A shell that removes the face leaves a rim
+    one wall wide: a fillet after it is half the wall, one before it is twice the wall,
+    so the inner radius never drops to zero."""
+    if op == "shell":
+        return sig(0.1 * e) if which == "first" else sig(0.025 * e)
+    return sig(0.05 * e)
+
+
+def hollow(b, e, op, to):
+    t = "Hollow the %s to %s mm walls leaving a closed internal void (no face removed)." % (
+        "upper body (the one above the split plane)" if op == "split" else
+        "main body (not the separate cylinder)" if to == "multiple bodies" else "body", fmt(sig(0.06 * e)))
+    if op == "split":
+        t += " Leave the lower body as it is."
+    return t
+
+
+def order_before(order, b, e, op=None, to=None):
     if order == "after fillet":
-        return "Fillet %s with %s mm." % (b["loop"], fmt(sig(0.05 * e)))
+        return "Fillet %s with %s mm." % (b["loop"], fmt(fillet_r(op, "first", e)))
     if order == "after shell":
-        return "Hollow the body to %s mm walls leaving a closed internal void (no face removed)." % fmt(sig(0.06 * e))
+        return hollow(b, e, None, to)
     if order == "after pattern":
         return cap(pattern_step(b, e)) + "."
     return ""
 
 
-def order_after(order, b, e):
+def order_after(order, b, e, op=None, to=None):
+    up = " on the upper body (the one with the original top face)" if op == "split" else ""
     if order == "before fillet":
-        return "Fillet %s with %s mm." % (b["loop"], fmt(sig(0.05 * e)))
+        return "Fillet %s%s with %s mm." % (b["loop"], up, fmt(fillet_r(op, "last", e)))
     if order == "before shell":
-        return "Hollow the body to %s mm walls leaving a closed internal void (no face removed)." % fmt(sig(0.06 * e))
+        return hollow(b, e, op, to)
     if order == "before pattern":
-        return cap(pattern_step(b, e)) + "."
+        return cap(pattern_step(b, e)) + (up or "") + "."
     return ""
 
 
@@ -525,7 +560,7 @@ def rim_fillet(R, r):
     return 2 * math.pi * (R - xbar) * A
 
 
-def expected_for(row, g, b, e, geo):
+def expected_for(row, g, b, e, geo, hit=False):
     """The expected object for an item. Volume only where closed form."""
     op, su, to, gp, sc, orr, pl = row
     bodies = 1 + (1 if to == "multiple bodies" else 0) + (1 if op == "split" else 0)
@@ -535,6 +570,8 @@ def expected_for(row, g, b, e, geo):
         refusal = abs(g) < TOL
     else:
         refusal = False
+    if hit or (op == "sheet-metal flange" and su == "spline"):
+        refusal = True      # a partial flange on a curved edge, or a fillet that runs into a feature
     out = {}
     v = volume_for(row, g, b, e, geo)
     if v is not None:
@@ -700,17 +737,50 @@ def volume_for(row, g, b, e, geo):
 
 
 # ------------------------------------------------------------------ brief
+FEATURE = {"tangent edges": "boss", "coplanar faces": "pads", "vertex on an edge": "pad",
+           "self-touching body": "cylinders", "thin wall near tolerance": "hole"}
+
+
+def in_reach(to, b, e, g, reach):
+    """True when the prelude feature stands within reach of the face's outer edge,
+    so a fillet or chamfer of that edge runs into it."""
+    hu = b["hu"]
+    s = sig(0.12 * e)
+    if to in ("tangent edges", "vertex on an edge", "thin wall near tolerance"):
+        return float(g) < reach
+    if to in ("coplanar faces", "self-touching body"):
+        return float(ex(inset(hu, e))) + s / 2.0 > hu - reach
+    return False
+
+
 def brief_for(row):
     op, su, to, gp, sc, orr, pl = row
     rng = random.Random(int(hashlib.sha256(("%d:%s" % (SEED, "|".join(row))).encode()).hexdigest()[:16], 16))
     sheet = op.startswith("sheet-metal")
     b = body(su, sc, sheet, rng)
     b["su"] = su
+    if su == "torus" and op in ("extrude", "sweep", "loft", "boolean cut"):
+        # these steps say which way is up or down: the flat face faces -Z
+        b["text"] += " (the flat face faces down, toward -Z, and the body lies above it)"
     e = min(b["Wmin"], 4 * b["H"])
     g = GAPS.get(gp)
     obj = rng.choice(OBJECTS[su]) if rng.random() < 0.6 else ""
     head = ("Like a %s: model " % obj) if obj else "Model "
-    steps = [order_before(orr, b, e), prelude(to, b, e, sc, g), op_step(op, b, e, sc), order_after(orr, b, e)]
+    steps = [order_before(orr, b, e, op, to), prelude(to, b, e, sc, g), op_step(op, b, e, sc, to, g),
+             order_after(orr, b, e, op, to)]
+    hit = False
+    if to in FEATURE:
+        rr = None
+        if op in ("fillet (constant)", "fillet (variable)", "chamfer"):
+            k = {"fillet (constant)": 0.07, "fillet (variable)": 0.14, "chamfer": 0.1}[op]
+            rr, idx = k * e, 2
+        elif orr == "before fillet":
+            rr, idx = fillet_r(op, "last", e), 3
+        if rr is not None and in_reach(to, b, e, g, rr):
+            hit = True
+            steps[idx] += (" The %s stands within the fillet's reach, so the fillet runs into it: "
+                           "round the edge up to it, or refuse if that cannot be built." % FEATURE[to]
+                           ).replace("fillet", "chamfer" if op == "chamfer" else "fillet")
     steps = [x for x in steps if x]
     text = head + b["text"] + "."
     if len(steps) == 1:
@@ -720,7 +790,7 @@ def brief_for(row):
     pt = placement_text(pl)
     if pt:
         text += " " + pt
-    exp = expected_for(row, g, b, e, geom(su, sc, sheet))
+    exp = expected_for(row, g, b, e, geom(su, sc, sheet), hit)
     return obj, text, exp
 
 

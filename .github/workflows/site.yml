@@ -1,0 +1,43 @@
+name: Results page
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "results/**"
+      - "items.jsonl"
+      - "tools/site.py"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+  # A merge by the bot's token starts no push workflows, so also run after each bot merge.
+  workflow_run:
+    workflows: ["Merge results"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the page
+        run: python3 tools/site.py
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

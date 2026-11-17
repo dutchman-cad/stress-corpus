@@ -1,5 +1,7 @@
 # Stress corpus
 
+Results at a glance: https://dutchman-cad.github.io/stress-corpus/ (every task as a pass, fail or not-started cell, with the fail rate per batch and per axis).
+
 10,000 small modelling tasks, each one a plain sentence with real millimetre sizes. Build them in SolidCraft and/or Fusion, convert with Dutchman, compare the results, and record every failure in a results pull request. The goal is to find and fix bugs.
 
 The tasks come from what a modelling kernel has to handle, not from a list of objects: an operation, on a type of surface, in a tricky topology situation, at a given distance from the exact contact, at an unusual scale, in a particular order, and placed in an awkward spot. A few items carry an everyday object name ("Like a ring: ...") as flavour only.
@@ -73,7 +75,7 @@ Combinations that cannot be built (for example a sheet-metal bend on a sphere) a
 
 1. Open the issues labelled `batch`. Each is a batch of 100 items: "Batch 07: S0601–S0700".
 2. Claim one by commenting `/claim` on it (or "claiming"). A bot assigns you at once; no repo access is needed. Hold at most two open batches at a time. Comment `/unclaim` to give a batch back.
-3. Work through the items. When your results PR merges, a bot ticks every item that has a result.
+3. Work through the items and open a results PR. When its checks pass it merges by itself, and a bot ticks every item that has a result.
 4. A maintainer closes the batch when every item has a result.
 
 ## Two ways to build an item

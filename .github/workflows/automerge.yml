@@ -1,0 +1,32 @@
+name: Merge results
+
+# A results PR that passed both checks (results format, and scope: text only, the author's own claimed batch,
+# items in range) is merged automatically, so results never wait on a maintainer and the page rebuilds at once.
+# Runs from the base branch's copy of this file with the repo's token; it never checks out the PR's code.
+on:
+  workflow_run:
+    workflows: ["Check results"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { data: prs } = await github.rest.pulls.list({ ...context.repo, state: 'open', per_page: 100 });
+            const pr = prs.find((p) => p.head.sha === run.head_sha);
+            if (!pr) { core.info('no open PR for this run'); return; }
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: pr.number });
+            if (!files.length || !files.every((f) => /^results\/batch-\d{2,3}\.jsonl$/.test(f.filename))) {
+              core.info(`#${pr.number} changes more than results; leaving it for a maintainer`); return;
+            }
+            await github.rest.pulls.merge({ ...context.repo, pull_number: pr.number, merge_method: 'squash', sha: run.head_sha });
+            core.info(`merged #${pr.number}`);

@@ -46,10 +46,12 @@ jobs:
             const maintainer = ['admin', 'maintain', 'write'].includes(perm.permission);
             const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: pr.number });
             const errors = [];
+            const isResults = files.some((f) => f.filename.startsWith('results/'));
             const banned = /\.(f3d|f3z|ipt|iam|sldprt|sldasm|step|stp|igs|iges|sc|stl|3mf|obj|zip|png|jpe?g|gif|webp|mp4|mov)$/i;
             for (const f of files) {
               if (banned.test(f.filename)) errors.push(`${f.filename}: design files, exports and images stay private; results are text only.`);
-              if (!maintainer && !/^results\/batch-\d{2,3}\.jsonl$/.test(f.filename)) errors.push(`${f.filename}: a results PR only changes results/batch-NN.jsonl.`);
+              // Only a results PR is limited to results files; other contributions (tools, docs) get a maintainer's review.
+              if (!maintainer && isResults && !/^results\/batch-\d{2,3}\.jsonl$/.test(f.filename)) errors.push(`${f.filename}: a results PR only changes results/batch-NN.jsonl; send other changes in their own PR.`);
             }
             for (const f of files.filter((f) => /^results\/batch-\d{2,3}\.jsonl$/.test(f.filename))) {
               const nn = parseInt(f.filename.match(/batch-(\d+)/)[1], 10);
