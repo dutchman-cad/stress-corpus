@@ -54,6 +54,9 @@ class Item:
         self.names = 0
 
     def add(self, command, **params):
+        if params.get("targets") == [PART] and PART + " (1)" in self.bodies:
+            # after a split, a feature on the face may land on either piece
+            params["targets"] = [PART, PART + " (1)"]
         self.cmds.append({"command": command, "params": params})
 
     def name(self, stem):
@@ -129,7 +132,7 @@ def cyl(it, r, h, x, y, z_from, up, op, name=None, body_name=None):
         p["name"] = name
     if body_name:
         p["body_name"] = body_name
-    it.cmds.append({"command": "solid.cylinder", "params": p})
+    it.add("solid.cylinder", **p)
 
 
 # ------------------------------------------------------------------ the steps
@@ -256,8 +259,13 @@ def op_step(it, op, su, sc, fr, e, to):
         it.add("solid.cylinder", radius=d, height=f3(8 * d), base=[cx, cy - f3(8 * d) / 2, fz - fr["o"] * d / 2],
                axis="Y", operation="cut", targets=[PART])
     elif op == "boolean intersect":
-        rad = f3(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2)) / 2
-        it.add("solid.sphere", center=fr["bbox_c"], radius=rad, operation="intersect", targets=[PART])
+        if su == "torus":
+            # gen.py: a sphere of 1.2 Wmin centred on the point C of the ring (#106)
+            it.add("solid.sphere", center=[cx, cy, fz], radius=f3(1.2 * fr["Wmin"]) / 2,
+                   operation="intersect", targets=[PART])
+        else:
+            rad = f3(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2)) / 2
+            it.add("solid.sphere", center=fr["bbox_c"], radius=rad, operation="intersect", targets=[PART])
     elif op == "thread":
         n, pi, ln = {"tiny": (1.6, 0.35, 1.6), "normal": (12, 1.75, 14), "huge": (100, 6, 120),
                      "extreme ratio": (1, 0.25, 0.5)}[sc]

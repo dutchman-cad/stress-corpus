@@ -67,7 +67,7 @@ Combinations that cannot be built (for example a sheet-metal bend on a sphere) a
 
 - `python3 scripts.py --batch 7` writes `scripts/batch-07.jsonl`; `python3 scripts.py` writes `scripts.jsonl` for every item. `scripts/batch-01.jsonl` is committed as an example.
 - `python3 scripts.py --check path/to/solidcraft-cli scripts/batch-07.jsonl [--jobs J] [--results results/batch-07.jsonl]` runs each script with `--param-check strict`, J at a time. It writes `check.jsonl` with one of the outcomes below and the detail per item, and with `--results`, the batch's results file. An item without a script comes out `skipped`. Without a closed-form `volume_mm3`, only the body count is checked, and the detail says so.
-- This version covers the steps that map straight onto SolidCraft commands: 4,562 of the 10,000 items. It doesn't yet cover spline outlines, sheet metal, sweeps, lofts, revolves, variable fillets, patterns along a path, the rotated pad of "vertex on an edge", a fillet or chamfer of a loop that an earlier step splits, or a circular pattern off the origin. Build those by hand from the brief.
+- This version covers the steps that map straight onto SolidCraft commands: 5,086 of the 10,000 items. It doesn't yet cover spline outlines, sheet metal, sweeps, lofts, revolves, variable fillets, patterns along a path, a fillet or chamfer of a loop that an earlier step splits, or a circular pattern off the origin. Build those by hand from the brief.
 
 ## Take part
 
