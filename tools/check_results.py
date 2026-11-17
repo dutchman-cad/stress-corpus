@@ -107,9 +107,12 @@ def check_file(path, items):
             errs += e
             warns += w
             if isinstance(rec, dict):
-                key = (rec.get("id"), rec.get("pipeline"))
+                # A line with rerun_of re-checks an earlier line on a newer build and sits beside it
+                # (README, "Check again on a newer build"): one per earlier build is allowed.
+                key = (rec.get("id"), rec.get("pipeline"), rec.get("rerun_of") or "")
                 if key in seen:
-                    errs.append(f"{where}: {key[0]} appears twice for pipeline {key[1]}")
+                    errs.append(f"{where}: {key[0]} appears twice for pipeline {key[1]}"
+                                + (f" re-checking {key[2]}" if key[2] else ""))
                 seen.add(key)
     return errs, warns
 
