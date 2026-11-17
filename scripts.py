@@ -155,7 +155,15 @@ def prelude(it, to, su, sc, fr, e, g):
         it.add("solid.box", length=S, width=S, height=h2, corner=[cx + u0 - S / 2, cy + S / 2, z2],
                operation="join", targets=[PART])
     elif to == "vertex on an edge":
-        raise Unsupported("rotated pad (solid.box has no rotation)")
+        # an s x s pad turned 45 deg about its vertical axis, its +X corner (hu - g) from C toward +X:
+        # built as its own body, turned about its centre, then joined
+        xv = cx + F(gen.fd(gen.D(fr["hu"]) - g))
+        xc = xv - S / math.sqrt(2)
+        z = fz if out else fz - Hh
+        it.add("solid.box", length=S, width=S, height=Hh, corner=[xc - S / 2, cy - S / 2, z],
+               operation="new", body_name="Pad")
+        it.add("solid.move", bodies=["Pad"], axis=[0.0, 0.0, 1.0], angle="45 deg", origin=[xc, cy, z])
+        it.add("solid.combine", target=PART, tools=["Pad"], operation="join")
     elif to == "thin wall near tolerance":
         x = F(gen.fd(gen.D(fr["hu"]) - g - gen.D(s) / 2))
         cyl(it, S / 2, dd, cx + x, cy, fz, not out, "cut")
