@@ -260,11 +260,11 @@ def op_step(it, op, su, sc, fr, e, to):
     elif op == "pattern (linear)":
         hole_row(it, fr, cx, d, dep, p)
     elif op == "pattern (circular)":
-        if cx != 0.0 or cy != 0.0:
-            raise Unsupported("circular pattern about an axis off the origin")
         name = it.name("Hole")
         cyl(it, d / 2, dep, cx + f3(1.5 * d), cy, fz, not out, "cut", name=name)
-        it.add("solid.pattern.circular", features=[name], axis="Z", count=6, angle="360 deg")
+        # about the vertical axis through C (off the origin on the torus's flat face)
+        axis = "Z" if (cx == 0.0 and cy == 0.0) else {"origin": [cx, cy, fz], "dir": [0.0, 0.0, 1.0]}
+        it.add("solid.pattern.circular", features=[name], axis=axis, count=6, angle="360 deg")
     elif op == "mirror":
         name = it.name("Boss")
         z = fz if out else fz - dep
