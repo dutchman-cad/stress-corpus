@@ -66,11 +66,46 @@ class Item:
 
 
 # ------------------------------------------------------------------ the body
-def body(it, su, sc):
+def spline_points(A, B):
+    """gen.spline_text's 8 outline points, as the brief prints them."""
+    pts = []
+    for k in range(8):
+        th = k * math.pi / 4
+        f = 1 + 0.1 * math.sin(3 * th)
+        pts.append([f3(0.5 * A * f * math.cos(th)), f3(0.5 * B * f * math.sin(th))])
+    return pts
+
+
+def sheet_body(it, su, sc, b, fr):
+    """gen.body(sheet=True): a flat sheet of thickness T on Z = 0, a rule with T, K 0.44 and bend radius
+    T, and the base flange from the outline (an A x B rectangle, or the spline)."""
+    A, B = {"tiny": (4, 3), "normal": (60, 40), "huge": (2400, 1600), "extreme ratio": (1000, 200)}[sc]
+    A, B, T = f3(A), f3(B), f3(b["T"])
+    it.add("sheet.manage_rules", name="Stock", thickness="%r mm" % T, k_factor=0.44, bend_radius="%r mm" % T,
+           active=True)
+    it.add("sketch.create", name="Base", plane={"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]})
+    if su == "plane":
+        it.add("sketch.rectangle.two_point", p0=[-A / 2, -B / 2], p1=[A / 2, B / 2])
+        fr.update(loop=[[0.0, -B / 2, T], [A / 2, 0.0, T], [0.0, B / 2, T], [-A / 2, 0.0, T]], edge_py=B / 2,
+                  sides=[[A / 2, 0.0, T / 2], [-A / 2, 0.0, T / 2], [0.0, B / 2, T / 2], [0.0, -B / 2, T / 2]])
+    else:
+        pts = spline_points(A, B)
+        it.add("sketch.spline.fit_point", periodic=True, points=pts)
+        fr.update(loop=[[0.0, pts[6][1], T]], edge_py=pts[2][1], sides=[[0.0, pts[6][1], T / 2]])
+    it.add("sketch.finish")
+    it.add("sheet.flange", sketch="Base", body_name=PART)
+    fr.update(fz=T, ext0=A / 2, rim=None, bbox_c=[0.0, 0.0, T / 2] if su == "plane" else None,
+              A=A, B=B, T=T, fh=f3(b["fh"]))
+    return fr
+
+
+def body(it, su, sc, sheet=False):
     """The base body, and its frame: the face's plane z and outward direction o (+1 up, -1 down),
     the face centre C, hu, H, the face's outer loop picks (off every seam and feature)."""
-    b = gen.body(su, sc, False, None)
+    b = gen.body(su, sc, sheet, None)
     fr = {"o": 1.0, "cx": 0.0, "cy": 0.0, "hu": b["hu"], "H": b["H"], "Wmin": b["Wmin"], "z0": b["z0"]}
+    if sheet:
+        return sheet_body(it, su, sc, b, fr)
     if su == "plane":
         A, B, H = {"tiny": (4, 3, 2), "normal": (60, 40, 25), "huge": (2400, 1600, 1000),
                    "extreme ratio": (1000, 200, 1)}[sc]
@@ -386,6 +421,17 @@ def op_step(it, op, su, sc, fr, e, to):
         z = F(gen.fmt(gen.sig(fr["z0"] + 0.5 * fr["H"], 4)))
         it.add("solid.split_body", body=PART, plane={"origin": [0.0, 0.0, z], "normal": [0.0, 0.0, 1.0]})
         it.bodies.append(PART + " (1)")
+    elif op == "sheet-metal flange":
+        # fh tall, 90 deg up, along the +X edge (picked a quarter along: a feature may sit at its middle)
+        it.add("sheet.flange", type="edge", edges=[[fr["A"] / 2, -fr["B"] / 4, fr["T"]]], height="%r mm" % fr["fh"],
+               angle="90 deg")
+        fr["loop_unscripted"] = "blend of a loop after the sheet is bent"
+    elif op == "sheet-metal bend":
+        # fold the part beyond X = x up 90 deg about the line X = x, inside radius T (the rule's K 0.44)
+        x = f3(gen.sig(0.2 * fr["A"]))
+        it.add("sheet.fold", points=[[x, -fr["B"], fr["T"]], [x, fr["B"], fr["T"]]], angle="90 deg",
+               radius="%r mm" % fr["T"])
+        fr["loop_unscripted"] = "blend of a loop after the sheet is bent"
     elif op == "offset face":
         it.add("solid.offset_face", faces=[[cx, cy, fz]], distance=dep)
         # the face moved out along its normal: so did its loop
@@ -412,11 +458,12 @@ def place(it, placement):
 
 def script_for(item):
     op, su, to, sc, orr = item["operation"], item["surface"], item["topology"], item["scale"], item["order"]
-    if op.startswith("sheet-metal"):
-        raise Unsupported("sheet metal")
+    sheet = op.startswith("sheet-metal")
+    if sheet and op == "sheet-metal flange" and su != "plane":
+        raise Unsupported("flange along part of a spline edge")
     g = gen.GAPS.get(item["gap"])
     it = Item()
-    fr = body(it, su, sc)
+    fr = body(it, su, sc, sheet)
     e = min(fr["Wmin"], 4 * fr["H"])
     # gen.brief_for's order: before-step, prelude, operation, after-step, placement
     if orr == "after fillet":
