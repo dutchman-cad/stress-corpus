@@ -407,7 +407,12 @@ def op_step(it, op, su, sc, fr, e, to):
         it.add("sketch.finish")
         path = sketch([cx, cy, fz], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])
         R = f3(3 * d)
-        it.add("sketch.arc.center_point", center=[R, 0.0], start=[R, R], end=[0.0, 0.0], id="arc")  # counter-clockwise
+        # sketch arcs run counter-clockwise: up from C, the arc is drawn from its top end; on the torus's
+        # flat face it leaves C going down, away from the body (#117)
+        if out:
+            it.add("sketch.arc.center_point", center=[R, 0.0], start=[R, R], end=[0.0, 0.0], id="arc")
+        else:
+            it.add("sketch.arc.center_point", center=[R, 0.0], start=[0.0, 0.0], end=[R, -R], id="arc")
         it.add("sketch.finish")
         it.add("solid.sweep", sketch=prof, path_sketch=path, path=["arc"], orientation="perpendicular",
                operation="join", targets=[PART])
@@ -417,13 +422,13 @@ def op_step(it, op, su, sc, fr, e, to):
         s0 = sketch([cx, cy, fz], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
         it.add("sketch.rectangle.two_point", p0=[-d / 2, -d / 2], p1=[d / 2, d / 2])
         it.add("sketch.finish")
-        s1 = sketch([cx, cy, fz + dep], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        s1 = sketch([cx, cy, fz + fr["o"] * dep], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])  # below, on the torus (#117)
         it.add("sketch.circle.center", center=[0.0, 0.0], radius=d / 2)
         it.add("sketch.finish")
         it.add("solid.loft", sections=[{"sketch": s0}, {"sketch": s1}], operation="join", targets=[PART])
         return
     if op == "extrude":
-        cyl(it, d / 2, dep, cx, cy, fz, True, "join")  # the brief says "upward" for every face
+        cyl(it, d / 2, dep, cx, cy, fz, out, "join")  # away from the body: down on the torus's flat face (#117)
     elif op == "cut":
         cyl(it, d / 2, dep, cx, cy, fz, not out, "cut")
     elif op == "shell":
@@ -443,13 +448,28 @@ def op_step(it, op, su, sc, fr, e, to):
             it.add("solid.fillet", edges=loop_picks(fr), radius=r, type="variable", radius2=r,
                    start=[cx + fr["hu"], cy, fz], mid=[[0.5, f3(2 * r)]])
     elif op == "chamfer":
-        it.add("solid.chamfer", edges=loop_picks(fr), distance=c, distance2=f3(2 * c))
+        # c down the side, 2 c across the face. SolidCraft's distance runs along the first face, the one
+        # facing up most: the face itself, except on the torus, whose flat face faces down
+        across, side = f3(2 * c), c
+        it.add("solid.chamfer", edges=loop_picks(fr), distance=across if out else side,
+               distance2=side if out else across)
     elif op == "draft":
         if not fr.get("sides"):
             raise Unsupported("draft on " + su)
         it.add("solid.draft", faces=fr["sides"], angle="3 deg", neutral="XY")
     elif op == "pattern (linear)":
         hole_row(it, fr, cx, d, dep, p)
+    elif op == "pattern (along a path)":
+        # a hole at C, 4 in all (gen.py's "repeat it N times": N holes, as its circular pattern's volume
+        # counts them), p apart along an arc of radius 4 p in the face that leaves C toward +X and curves
+        # toward +Y; solid.pattern.path's distance spans the first hole to the last
+        name = it.name("Hole")
+        cyl(it, d / 2, dep, cx, cy, fz, not out, "cut", name=name)
+        path = sketch([cx, cy, fz], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        R = f3(4 * p)
+        it.add("sketch.arc.center_point", center=[0.0, R], start=[0.0, 0.0], end=[R, R], id="arc")
+        it.add("sketch.finish")
+        it.add("solid.pattern.path", features=[name], path_sketch=path, path=["arc"], count=4, distance=f3(3 * p))
     elif op == "pattern (circular)":
         name = it.name("Hole")
         cyl(it, d / 2, dep, cx + f3(1.5 * d), cy, fz, not out, "cut", name=name)
@@ -475,7 +495,9 @@ def op_step(it, op, su, sc, fr, e, to):
         else:
             if fr["bbox_c"] is None:
                 raise Unsupported("sphere at the bounding-box centre of a spline body")
-            rad = f3(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2)) / 2
+            # #117: the sphere reaches the features, which sit up to hu from the axis on the top face
+            reach = 1.1 * math.sqrt(fr["hu"] ** 2 + (fr["H"] / 2.0) ** 2)
+            rad = f3(max(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2), 2 * reach)) / 2
             it.add("solid.sphere", center=fr["bbox_c"], radius=rad, operation="intersect", targets=[PART])
             if any(math.dist(q, fr["bbox_c"]) > rad for q in fr["loop"]):
                 # the sphere trims the face's outer loop away where a pick was
@@ -505,13 +527,14 @@ def op_step(it, op, su, sc, fr, e, to):
                radius="%r mm" % fr["T"])
         fr["loop_unscripted"] = "blend of a loop after the sheet is bent"
     elif op == "offset face":
+        if to in gen.PADS_ON_FACE:
+            dep = f3(gen.sig(0.5 * gen.sig(0.12 * e)))  # half the pad height: the pads stay proud (#117)
         it.add("solid.offset_face", faces=[[cx, cy, fz]], distance=dep)
         # the face moved out along its normal: so did its loop
         fr["loop"] = [[q[0], q[1], q[2] + fr["o"] * dep] for q in fr["loop"]]
         fr["fz"] = fz + fr["o"] * dep
     else:
-        raise Unsupported(op + " (needs a sketch)" if op in (
-            "pattern (along a path)",) else op)
+        raise Unsupported(op)
 
 
 def place(it, placement):
@@ -539,7 +562,7 @@ def script_for(item):
     e = min(fr["Wmin"], 4 * fr["H"])
     # gen.brief_for's order: before-step, prelude, operation, after-step, placement
     if orr == "after fillet":
-        fillet_loop(it, fr, f3(gen.sig(0.05 * e)), "clean")
+        fillet_loop(it, fr, f3(gen.fillet_r(op, "first", e)), "clean")
     elif orr == "after shell":
         it.add("solid.shell", faces=[], thickness=f3(gen.sig(0.06 * e)), body=PART)
     elif orr == "after pattern":
@@ -547,7 +570,7 @@ def script_for(item):
     prelude(it, to, su, sc, fr, e, g)
     op_step(it, op, su, sc, fr, e, to)
     if orr == "before fillet":
-        fillet_loop(it, fr, f3(gen.sig(0.05 * e)), to)
+        fillet_loop(it, fr, f3(gen.fillet_r(op, "last", e)), to)
     elif orr == "before shell":
         it.add("solid.shell", faces=[], thickness=f3(gen.sig(0.06 * e)), body=PART)
     elif orr == "before pattern":
