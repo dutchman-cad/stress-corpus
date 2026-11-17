@@ -136,8 +136,9 @@ def body(it, su, sc):
         # the -Y outline point (270 deg) and the +X point (0 deg) are on the curve; the bounding box
         # centre is not closed form, so a sphere at it is not scripted
         py = pts[6][1]
+        # the +Y outline point (90 deg) is on the curve too: the edge chain's notch is centred there
         fr.update(fz=H, loop=[[0.0, py, H]], ext0=pts[0][0], sides=[[0.0, py, H / 2]],
-                  edge_py=None, rim=None, bbox_c=None)
+                  edge_py=pts[2][1], rim=None, bbox_c=None)
     return fr
 
 
@@ -215,14 +216,16 @@ def prelude(it, to, su, sc, fr, e, g):
         cyl(it, S / 2, Hh, fr["ext0"] + gap + S / 2, 0.0, 0.0, True, "new", body_name="Extra")
         it.bodies.append("Extra")
     elif to == "edge chain around a corner":
-        if su not in ("plane", "cylinder"):
+        if su not in ("plane", "cylinder", "spline"):
             raise Unsupported("edge chain on " + su)
         z = fz - dd if out else fz
         it.add("solid.box", length=S, width=S, height=dd, corner=[-S / 2, fr["edge_py"] - S / 2, z],
                operation="cut", targets=[PART])
         # the loop runs round the notch's three edges in the face; the +Y edge is cut in two
         yb = fr["edge_py"] - S / 2
-        ye = fr["edge_py"] if su == "plane" else math.sqrt(fr["edge_py"] ** 2 - S * S / 4)
+        # where the notch's sides meet the outer edge: the block's straight edge, the cylinder's circle;
+        # on the spline, the curve stays within a hair of the +Y point over the notch's width
+        ye = math.sqrt(fr["edge_py"] ** 2 - S * S / 4) if su == "cylinder" else fr["edge_py"]
         picks = [[0.0, yb, fz], [-S / 2, (yb + ye) / 2, fz], [S / 2, (yb + ye) / 2, fz]]
         if su == "plane":
             fr["loop"] = [q for q in fr["loop"] if not (q[0] == 0.0 and q[1] > 0)] + [
@@ -323,9 +326,15 @@ def op_step(it, op, su, sc, fr, e, to):
     elif op == "fillet (variable)":
         # r at the loop's +X point, rising linearly to 2 r at the opposite point (halfway round), and back
         if su == "torus":
-            raise Unsupported("variable fillet of the torus's two loops (which +X point)")
-        it.add("solid.fillet", edges=loop_picks(fr), radius=r, type="variable", radius2=r,
-               start=[cx + fr["hu"], cy, fz], mid=[[0.5, f3(2 * r)]])
+            # each of the two loops from its own +X point (the ring's inner and outer circle)
+            if len(loop_picks(fr)) != 2:
+                raise Unsupported("variable fillet of a torus loop that the prelude splits")
+            for q, xs in zip(loop_picks(fr), (cx - fr["hu"], cx + fr["hu"])):
+                it.add("solid.fillet", edges=[q], radius=r, type="variable", radius2=r,
+                       start=[xs, 0.0, fz], mid=[[0.5, f3(2 * r)]])
+        else:
+            it.add("solid.fillet", edges=loop_picks(fr), radius=r, type="variable", radius2=r,
+                   start=[cx + fr["hu"], cy, fz], mid=[[0.5, f3(2 * r)]])
     elif op == "chamfer":
         it.add("solid.chamfer", edges=loop_picks(fr), distance=c, distance2=f3(2 * c))
     elif op == "draft":
