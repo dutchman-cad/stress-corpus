@@ -166,6 +166,8 @@ def prelude(it, to, su, sc, fr, e, g):
     if to == "tangent edges":
         x = F(gen.fd(gen.D(fr["hu"]) - gen.D(s) / 2 - g))
         cyl(it, S / 2, Hh, cx + x, cy, fz, out, "join")
+        # the boss overhangs (g < 0): the loop runs round its base inside the face
+        split_loop(fr, [[cx + x - S / 2, cy, fz]] if g < 0 else [], plus_x=True)
     elif to == "coplanar faces":
         z = fz if out else fz - Hh
         # the first pad centred u0 from C toward +X; the second beside it toward +Y, sharing a side
@@ -185,15 +187,25 @@ def prelude(it, to, su, sc, fr, e, g):
                operation="new", body_name="Pad")
         it.add("solid.move", bodies=["Pad"], axis=[0.0, 0.0, 1.0], angle="45 deg", origin=[xc, cy, z])
         it.add("solid.combine", target=PART, tools=["Pad"], operation="join")
+        if g < 0:
+            # the corner pokes |g| beyond the edge: the loop's two pad edges are |g| sqrt 2 long, under the
+            # tolerance, so a point cannot pick them apart from the outer edge
+            fr["loop_unscripted"] = "fillet of a loop with sub-tolerance pad edges"
+        split_loop(fr, [], plus_x=True)
     elif to == "thin wall near tolerance":
         x = F(gen.fd(gen.D(fr["hu"]) - g - gen.D(s) / 2))
         cyl(it, S / 2, dd, cx + x, cy, fz, not out, "cut")
+        # the hole breaks out (g < 0): the loop runs round its inner side
+        split_loop(fr, [[cx + x - S / 2, cy, fz]] if g < 0 else [], plus_x=True)
     elif to == "feature at a seam or pole":
         if fr["rim"] is None:
             raise Unsupported("seam notch on " + su)
         y = F(gen.fd(gen.D(s) / 2 + g))
         th = y / fr["rim"]  # the distance is measured along the circular edge from the seam (+X)
         cyl(it, S / 2, dd, fr["rim"] * math.cos(th), fr["rim"] * math.sin(th), fz, not out, "cut")
+        # the notch is centred on the edge: the loop runs round its inner side
+        ri = fr["rim"] - S / 2
+        split_loop(fr, [[ri * math.cos(th), ri * math.sin(th), fz]], plus_x=False)
     elif to == "self-touching body":
         ap = F(gen.fd(gen.D(s) + g))
         for dy in (-ap / 2, ap / 2):
@@ -208,6 +220,14 @@ def prelude(it, to, su, sc, fr, e, g):
         z = fz - dd if out else fz
         it.add("solid.box", length=S, width=S, height=dd, corner=[-S / 2, fr["edge_py"] - S / 2, z],
                operation="cut", targets=[PART])
+        # the loop runs round the notch's three edges in the face; the +Y edge is cut in two
+        yb = fr["edge_py"] - S / 2
+        ye = fr["edge_py"] if su == "plane" else math.sqrt(fr["edge_py"] ** 2 - S * S / 4)
+        picks = [[0.0, yb, fz], [-S / 2, (yb + ye) / 2, fz], [S / 2, (yb + ye) / 2, fz]]
+        if su == "plane":
+            fr["loop"] = [q for q in fr["loop"] if not (q[0] == 0.0 and q[1] > 0)] + [
+                [-fr["ext0"] / 2, fr["edge_py"], fz], [fr["ext0"] / 2, fr["edge_py"], fz]]
+        fr["loop"] = fr["loop"] + picks
 
 
 def hole_row(it, fr, x, d, dep, p):
@@ -223,14 +243,28 @@ def pattern_holes(it, fr, e):
     hole_row(it, fr, fr["cx"] - F(gen.ex(gen.inset(fr["hu"], e))), d, dep, p)
 
 
-def loop_intact(to):
-    return to in ("clean", "coplanar faces", "self-touching body", "multiple bodies")
+def split_loop(fr, extra, plus_x):
+    """The prelude cut into the face's outer loop: pick its new edges too. On a block, a feature at the +X
+    edge's midpoint sits on (or within a gap of) the +X edge's own pick, so pick that edge a quarter of
+    the way along instead, and both quarters when the feature cuts it in two."""
+    loop = fr["loop"]
+    if plus_x and fr["rim"] is None and fr.get("edge_py") is not None:  # the block
+        q = [p for p in loop if p[0] > 0 and p[1] == 0.0]
+        if q:
+            b4 = fr["edge_py"] / 2
+            loop = [p for p in loop if p not in q] + [[q[0][0], -b4, q[0][2]]] + (
+                [[q[0][0], b4, q[0][2]]] if extra else [])
+    fr["loop"] = loop + extra
+
+
+def loop_picks(fr):
+    if fr.get("loop_unscripted"):
+        raise Unsupported(fr["loop_unscripted"])
+    return fr["loop"]
 
 
 def fillet_loop(it, fr, r, to):
-    if not loop_intact(to):
-        raise Unsupported("fillet of a loop that the prelude splits")
-    it.add("solid.fillet", edges=fr["loop"], radius=r)
+    it.add("solid.fillet", edges=loop_picks(fr), radius=r)
 
 
 def op_step(it, op, su, sc, fr, e, to):
@@ -287,9 +321,7 @@ def op_step(it, op, su, sc, fr, e, to):
     elif op == "fillet (constant)":
         fillet_loop(it, fr, r, to)
     elif op == "chamfer":
-        if not loop_intact(to):
-            raise Unsupported("chamfer of a loop that the prelude splits")
-        it.add("solid.chamfer", edges=fr["loop"], distance=c, distance2=f3(2 * c))
+        it.add("solid.chamfer", edges=loop_picks(fr), distance=c, distance2=f3(2 * c))
     elif op == "draft":
         if not fr.get("sides"):
             raise Unsupported("draft on " + su)
@@ -323,6 +355,9 @@ def op_step(it, op, su, sc, fr, e, to):
                 raise Unsupported("sphere at the bounding-box centre of a spline body")
             rad = f3(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2)) / 2
             it.add("solid.sphere", center=fr["bbox_c"], radius=rad, operation="intersect", targets=[PART])
+            if any(math.dist(q, fr["bbox_c"]) > rad for q in fr["loop"]):
+                # the sphere trims the face's outer loop away where a pick was
+                fr["loop_unscripted"] = "fillet of a loop that the intersecting sphere trims"
     elif op == "thread":
         n, pi, ln = {"tiny": (1.6, 0.35, 1.6), "normal": (12, 1.75, 14), "huge": (100, 6, 120),
                      "extreme ratio": (1, 0.25, 0.5)}[sc]
@@ -338,6 +373,9 @@ def op_step(it, op, su, sc, fr, e, to):
         it.bodies.append(PART + " (1)")
     elif op == "offset face":
         it.add("solid.offset_face", faces=[[cx, cy, fz]], distance=dep)
+        # the face moved out along its normal: so did its loop
+        fr["loop"] = [[q[0], q[1], q[2] + fr["o"] * dep] for q in fr["loop"]]
+        fr["fz"] = fz + fr["o"] * dep
     else:
         raise Unsupported(op + " (needs a sketch)" if op in (
             "revolve", "sweep", "loft", "fillet (variable)", "pattern (along a path)") else op)
