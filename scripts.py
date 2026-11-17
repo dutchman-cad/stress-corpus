@@ -23,6 +23,7 @@ items.jsonl. One JSON object per line:
       the README's format (pipeline "solidcraft", the CLI's version).
 """
 import json
+import re
 import math
 import os
 import subprocess
@@ -359,12 +360,34 @@ def first_error(text):
 
 
 def measured(stdout):
-    """The run's body count and total volume, from its JSON summary."""
+    """The run's body count and total volume, from its JSON summary, and the README's `measured`."""
     try:
         data = json.loads(stdout[stdout.index("{"):])
     except ValueError:
         return None
-    return data.get("body_count"), (data.get("total") or {}).get("volume_mm3")
+    tot = data.get("total") or {}
+    m = {"volume_mm3": tot.get("volume_mm3"), "bodies": data.get("body_count")}
+    for k in ("faces", "edges", "vertices"):
+        if isinstance(tot.get(k), int):
+            m[k] = tot[k]
+    return data.get("body_count"), tot.get("volume_mm3"), {k: v for k, v in m.items() if v is not None}
+
+
+STEP_ERR = re.compile(r"^error: step \d+ \(([^)]+)\): (.*)$")
+
+
+def signature(text):
+    """The README's signature: the first error message as the CLI prints it, ' @ ', the failing command.
+    A message that ends in a colon (an SMLib check) takes the next line, which names the failed test."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for i, line in enumerate(lines):
+        m = STEP_ERR.match(line)
+        if m:
+            msg = m.group(2)
+            if msg.endswith(":") and i + 1 < len(lines):
+                msg += " " + lines[i + 1]
+            return "%s @ %s" % (msg, m.group(1))
+    return "%s @ solidcraft-cli run" % (first_error(text) or "no message")
 
 
 def check_one(cli, tmp, r):
@@ -379,27 +402,33 @@ def check_one(cli, tmp, r):
         p = subprocess.run([cli, "run", path, "--param-check", "strict"], capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        return {"id": r["id"], "outcome": "hang", "detail": "no result in %d s" % TIMEOUT_S}
+        return {"id": r["id"], "outcome": "hang", "detail": "no result in %d s" % TIMEOUT_S,
+                "signature": "no result in %d s @ the whole script" % TIMEOUT_S}
     text = p.stderr + p.stdout
     if p.returncode != 0:
         if "panick" in text.lower() or p.returncode not in (1, 2):
-            return {"id": r["id"], "outcome": "crash", "detail": first_error(text) or "exit %d" % p.returncode}
+            return {"id": r["id"], "outcome": "crash", "detail": first_error(text) or "exit %d" % p.returncode,
+                    "signature": signature(text)}
         if "param" in first_error(text).lower() and "check" in first_error(text).lower():
             return {"id": r["id"], "outcome": "skipped", "detail": "script refused by --param-check: " + first_error(text)}
         ok = exp.get("refusal_ok", False)
-        return {"id": r["id"], "outcome": "correct-refusal" if ok else "wrong-refusal", "detail": first_error(text)}
+        return {"id": r["id"], "outcome": "correct-refusal" if ok else "wrong-refusal", "detail": first_error(text),
+                "signature": signature(text)}
     got = measured(p.stdout)
     if not got:
-        return {"id": r["id"], "outcome": "crash", "detail": "built, but printed no summary"}
-    bodies, vol = got
+        return {"id": r["id"], "outcome": "crash", "detail": "built, but printed no summary",
+                "signature": "built, but printed no summary @ solidcraft-cli run"}
+    bodies, vol, meas = got
     want = exp.get("volume_mm3")
     wrong = (exp.get("bodies") is not None and bodies != exp["bodies"]) or (
         want is not None and vol is not None and abs(vol - want) > 1e-6 * max(1.0, abs(want)) + 1e-4)
     detail = "bodies %s volume %r (expected %s, %s)" % (bodies, vol, exp.get("bodies"), want)
     if wrong:
-        return {"id": r["id"], "outcome": "wrong-result", "detail": detail}
+        return {"id": r["id"], "outcome": "wrong-result", "detail": detail, "measured": meas,
+                "signature": "%s bodies, volume %r where %s and %s are expected @ result" % (bodies, vol, exp.get("bodies"), want)}
     # without a closed-form volume only the body count is checked: say so
-    return {"id": r["id"], "outcome": "correct", "detail": "" if want is not None else "body count only: " + detail}
+    return {"id": r["id"], "outcome": "correct", "detail": "" if want is not None else "body count only: " + detail,
+            "measured": meas}
 
 
 def cli_version(cli):
@@ -431,8 +460,12 @@ def check(cli, source, jobs=4, results=None, report="check.jsonl"):
         os.makedirs(os.path.dirname(results) or ".", exist_ok=True)
         with open(results, "w", encoding="utf-8", newline="\n") as fh:
             for res in done:
-                fh.write(json.dumps({"id": res["id"], "pipeline": "solidcraft", "outcome": res["outcome"],
-                                     "version": version, "link": ""}) + "\n")
+                line = {"id": res["id"], "pipeline": "solidcraft", "outcome": res["outcome"],
+                        "version": version, "build": version, "link": ""}
+                for k in ("signature", "measured"):
+                    if k in res:
+                        line[k] = res[k]
+                fh.write(json.dumps(line, ensure_ascii=False) + "\n")
     print("checked %d items: %s" % (len(recs), counts), file=sys.stderr)
 
 
