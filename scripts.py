@@ -320,6 +320,12 @@ def op_step(it, op, su, sc, fr, e, to):
         it.add("solid.shell", faces=[[cx, cy, fz]], thickness=w, body=PART)
     elif op == "fillet (constant)":
         fillet_loop(it, fr, r, to)
+    elif op == "fillet (variable)":
+        # r at the loop's +X point, rising linearly to 2 r at the opposite point (halfway round), and back
+        if su == "torus":
+            raise Unsupported("variable fillet of the torus's two loops (which +X point)")
+        it.add("solid.fillet", edges=loop_picks(fr), radius=r, type="variable", radius2=r,
+               start=[cx + fr["hu"], cy, fz], mid=[[0.5, f3(2 * r)]])
     elif op == "chamfer":
         it.add("solid.chamfer", edges=loop_picks(fr), distance=c, distance2=f3(2 * c))
     elif op == "draft":
@@ -378,7 +384,7 @@ def op_step(it, op, su, sc, fr, e, to):
         fr["fz"] = fz + fr["o"] * dep
     else:
         raise Unsupported(op + " (needs a sketch)" if op in (
-            "revolve", "sweep", "loft", "fillet (variable)", "pattern (along a path)") else op)
+            "pattern (along a path)",) else op)
 
 
 def place(it, placement):
