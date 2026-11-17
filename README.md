@@ -2,74 +2,130 @@
 
 10,000 small modelling tasks, each one a plain sentence with real millimetre sizes. Build them in SolidCraft and/or Fusion, convert with Dutchman, compare the results, and file every failure where the bug lives. The goal is to find and fix bugs.
 
-The tasks come from what a modelling kernel has to handle, not from a list of objects: an operation, on a type of surface, in a tricky topology situation, at an unusual scale, in a particular order. A few items carry an everyday object name ("Like a ring: ...") as flavour only.
+The tasks come from what a modelling kernel has to handle, not from a list of objects: an operation, on a type of surface, in a tricky topology situation, at a given distance from the exact contact, at an unusual scale, in a particular order, and placed in an awkward spot. A few items carry an everyday object name ("Like a ring: ...") as flavour only.
 
-Example (`S0263 · fillet (variable) × torus × tangent edges × tiny × before shell`):
+Example (`S0253 · split × cylinder × tangent edges (gap -1e-6) × normal × after pattern × far`):
 
-> Like a ring: model the upper half (Z ≥ 0) of a torus about the Z axis: centre-circle Ø3.6 mm, tube Ø1.2 mm, cut by the plane Z = 0, so the body has a flat annular face at Z = 0. (1) Add a Ø0.14 mm boss, 0.14 mm tall, on the flat cut face with its centre 0.53 mm from the point on the centre circle of the flat cut face at +X (X = 1.8 mm, Y = 0) toward +X, so its side is exactly tangent to the face's outer edge. (2) Fillet both edge loops (inner and outer circle) of the flat cut face with a variable radius: 0.084 mm at the +X point, rising linearly to 0.168 mm at the opposite point. (3) Hollow the body to 0.072 mm walls leaving a closed internal void (no face removed).
+> Like a bollard: model a Ø40 × 60 mm cylinder with a vertical axis through the origin, resting on Z = 0. (1) Cut a Ø4 mm hole, 16 mm deep, in the top face 16 mm from the centre of the top face toward -X, then repeat it in a linear pattern of 3 along Y at 6 mm pitch, so the holes are at Y = -6, 0 and +6 mm. (2) Add a Ø4.8 mm boss, 4.8 mm tall, on the top face with its centre 17.600001 mm from the centre of the top face toward +X, so its side overhangs the face's outer edge by 0.000001 mm. (3) Split the body with the plane Z = 30 mm into two bodies and keep both. Finally, move everything 10000 mm along +X: the original origin lands at (10000, 0, 0).
+
+Its `expected` is `{"volume_mm3": 74881.8967, "bodies": 2, "refusal_ok": true}`.
 
 ## The axes
 
-Every item is one value from each axis. The first 196 items (`"pairwise": true`) are an all-pairs set: every feasible pair of values from two different axes appears in at least one of them (784 pairs). The other 9,804 are random extra combinations. Pairs that cannot be built (for example a sheet-metal bend on a sphere) are left out.
+Every item is one value from each of seven axes.
 
 | Axis | Values |
 |---|---|
 | operation | extrude, cut, revolve, sweep, loft, shell, fillet (constant), fillet (variable), chamfer, draft, pattern (linear), pattern (circular), pattern (along a path), mirror, boolean join, boolean cut, boolean intersect, thread, sheet-metal flange, sheet-metal bend, split, offset face |
 | surface | plane, cylinder, cone, sphere, torus, spline |
 | topology | clean, tangent edges, coplanar faces, vertex on an edge, thin wall near tolerance, feature at a seam or pole, self-touching body, multiple bodies, edge chain around a corner |
+| gap | exact, +1e-7, +1e-6, +tol, +2·tol, +1e-4, -1e-6, -tol (only for the six contact topologies below); `none` for the other topologies |
 | scale | tiny (features under 1 mm), normal, huge (over 1 m), extreme ratio (1000:1) |
 | order | none, before fillet, after fillet, before shell, after shell, before pattern, after pattern |
+| placement | origin, rotated, far, rotated + far |
 
-To propose a new value (or a new axis), open an issue titled "Axis: <name>" with the value, one example brief with real dimensions, and what it would catch. If it is accepted, the new items are generated as extra batches after the last one; existing IDs never change.
+**Gap.** Applies to tangent edges, coplanar faces, vertex on an edge, thin wall near tolerance, feature at a seam or pole, and self-touching body. It says how far from the exact contact the feature sits, in millimetres and absolute (the kernel's tolerance is absolute, 1e-5 mm, so the gaps do not scale with the part): `exact` is 0, `+1e-7` is 0.0000001 mm, `+tol` is 0.00001 mm, `+2·tol` is 0.00002 mm, `+1e-4` is 0.0001 mm, and the two negative values overlap the contact by 0.000001 mm and 0.00001 mm. A positive gap means clear of the contact, a negative gap means overlapping it. What the contact is, per topology:
 
-`items.jsonl` has one JSON line per item: `id, operation, surface, topology, scale, order, object, pairwise, brief`. `gen.py` writes it from a fixed seed, so `python3 gen.py` reproduces the exact same file.
+- tangent edges: how far the boss's side is inside (or, negative, beyond) the face's outer edge;
+- coplanar faces: how much taller (or, negative, shorter) the second pad is, so its top is that far from coplanar;
+- vertex on an edge: how far the pad's corner is inside (or, negative, beyond) the outer edge;
+- thin wall near tolerance: the wall left between the hole and the outer edge (zero or negative means the hole touches or breaks through the edge);
+- feature at a seam or pole: how far the notch's nearest side is from the seam line (negative means it overlaps the seam);
+- self-touching body: the gap between the two cylinders (negative means they overlap).
+
+**Placement.** The last step of the brief places the whole finished part. `rotated` turns it 17° about X, then 31° about Z, both through the origin (right-hand rule). `far` moves it 10000 mm (10 m) along +X. `rotated + far` rotates first, then moves. The brief gives the exact coordinates: where the original origin lands and where the original X and Z axes point.
+
+To propose a new value (or a new axis), open an issue titled "Axis: <name>" with the value, one example brief with real dimensions, and what it would catch. If it is accepted, the new items are generated as extra batches after the last one; from then on existing IDs never change.
+
+## Coverage
+
+`gen.py` builds the list in three steps, all from one fixed seed:
+
+1. **Three-wise.** Every feasible combination of operation × topology × order appears in at least one item: 1,232 items, spread through every batch (`"coverage": "threewise"`).
+2. **Pairwise.** Every feasible pair of values from two different axes, over all seven axes including gap and placement, appears in at least one item: 1,414 feasible pairs. The three-wise items already cover all of them, so this step added 0 more items (`"coverage": "pairwise"` is kept for items it would add).
+3. **Random fill.** 8,768 more random combinations bring the total to 10,000 (`"coverage": "random"`). The fill is weighted so each topology is about as likely as any other, and so about 60% of the fill is at the origin.
+
+Combinations that cannot be built (for example a sheet-metal bend on a sphere) are left out.
+
+## Item format
+
+`items.jsonl` has one JSON line per item: `id, operation, surface, topology, gap, scale, order, placement, object, coverage, pairwise, brief, expected`. `pairwise` is true for every item in the three-wise or pairwise sets. `gen.py` writes it from a fixed seed, so `python3 gen.py` reproduces the exact same file, and `python3 gen.py batch 7` prints the body of the Batch 07 issue.
+
+`expected` is what the generator can work out itself, from the same numbers that are in the brief:
+
+```json
+"expected": {"volume_mm3": 199998.817, "bodies": 1, "refusal_ok": false}
+```
+
+- `volume_mm3`: the total volume of all bodies, only when it is closed form for that exact item (1,070 items so far). If the field is missing, no value is claimed.
+- `bodies`: how many separate bodies the finished part has.
+- `refusal_ok`: true when a wall or gap in the item is under the kernel tolerance of 1e-5 mm, so refusing to build it is acceptable.
+
+### Scripts for SolidCraft
+
+`scripts.py` gives an item a runnable `solidcraft-cli` command script. It uses `gen.py`'s own numbers, so the script builds what the brief prints, gap and placement included. It never changes `items.jsonl`. Each line holds `id`, `script` (or `null`), `unsupported` (why there is no script yet) and the item's `expected`.
+
+- `python3 scripts.py --batch 7` writes `scripts/batch-07.jsonl`; `python3 scripts.py` writes `scripts.jsonl` for every item. `scripts/batch-01.jsonl` is committed as an example.
+- `python3 scripts.py --check path/to/solidcraft-cli scripts/batch-07.jsonl [--jobs J] [--results results/batch-07.jsonl]` runs each script with `--param-check strict`, J at a time. It writes `check.jsonl` with one of the outcomes below and the detail per item, and with `--results`, the batch's results file. An item without a script comes out `skipped`. Without a closed-form `volume_mm3`, only the body count is checked, and the detail says so.
+- This version covers the steps that map straight onto SolidCraft commands: 4,562 of the 10,000 items. It doesn't yet cover spline outlines, sheet metal, sweeps, lofts, revolves, variable fillets, patterns along a path, the rotated pad of "vertex on an edge", a fillet or chamfer of a loop that an earlier step splits, or a circular pattern off the origin. Build those by hand from the brief.
 
 ## Take part
 
 1. Open the issues labelled `batch`. Each is a batch of 100 items: "Batch 07: S0601–S0700".
-2. Claim one by assigning it to yourself. Only collaborators can be assigned, so if you are not one yet, comment "claiming" and a maintainer will assign you.
+2. Claim one by commenting `/claim` on it (or "claiming"). A bot assigns you at once; no repo access is needed. Hold at most two open batches at a time. Comment `/unclaim` to give a batch back.
 3. Work through the items and tick each box as you finish it.
 4. Close the batch issue when every box is ticked.
 
 ## Two ways to build an item
 
 - **SolidCraft:** build the part from the brief in SolidCraft. Note anything it refuses, gets wrong, or cannot do.
-- **Fusion, then Dutchman:** build the same part in Fusion, export a STEP file from Fusion, convert the Fusion design with Dutchman, and compare the Dutchman result with Fusion's STEP export.
+- **Fusion, then Dutchman:** build the same part in Fusion, export a STEP file from Fusion, convert the Fusion design with Dutchman, and compare the Dutchman result with Fusion's STEP export. Compare volume, surface area, face, edge and vertex counts, and a distance bound between the two shapes.
 
 You can do either or both. Say which in the results.
 
-## Scripts for SolidCraft
+## Outcomes
 
-`scripts.py` writes the machine-runnable form of each item. It uses `gen.py`'s own numbers, so a script builds what its brief prints, and it leaves `items.jsonl` untouched. Each JSON line has `id`, `script` (a `solidcraft-cli` command script), `unsupported` (why there is no script yet) and `expected`.
+| Outcome | Meaning |
+|---|---|
+| `correct` | It built, and the result matches the expected values (or, for Fusion → Dutchman, matches Fusion's STEP). |
+| `wrong-result` | It built, but the volume, body count or geometry is wrong. These are the worst bugs: nothing reports an error. |
+| `correct-refusal` | It was refused, and `refusal_ok` is true. |
+| `wrong-refusal` | It was refused, but `refusal_ok` is false: the item is valid. |
+| `crash` | The program crashed or panicked. |
+| `hang` | It did not finish in a reasonable time. |
+| `skipped` | Not attempted. |
 
-- `python3 scripts.py --pairwise` writes `scripts-pairwise.jsonl`, the 196 all-pairs items. That sample is committed. `python3 scripts.py` writes `scripts.jsonl` for every item; generate it locally when you need it.
-- Run one with `solidcraft-cli run script.json --param-check strict`. A malformed script fails as a parameter error, so a generator mistake can't pass for a kernel bug.
-- `expected.bodies` is the number of solid bodies at the end. `expected.volume_mm3` is exact where every step adds or removes a solid with a closed-form volume (primitives, holes and patterns of holes wholly inside their face, bosses, pads, a moved planar face, a split); otherwise it is `null`.
-- `python3 scripts.py --check path/to/solidcraft-cli [N] [--jobs J] [--in FILE]` runs the first N scripts of FILE (`scripts.jsonl` by default, all of them), J at a time (4 by default). It writes `check.jsonl`: per item, `built`, `wrong-result` (bodies or volume differ from `expected`), `failed` (with the first error line) or `hang`.
-- Items without a script still need building by hand from the brief. This first version covers the steps that map straight onto SolidCraft commands. It doesn't yet cover spline outlines, sheet metal, sweeps, lofts, revolves, variable fillets, patterns along a path, rotated pads, or a fillet or chamfer of a loop that an earlier step splits.
+Items with no `volume_mm3` cannot be called `correct` from the number alone: check the body count and look at the part, and say what you checked.
 
 ## Record results
 
 Add a pull request with `results/<batch>.jsonl` (for example `results/batch-07.jsonl`). One line per item and pipeline:
 
 ```json
-{"id": "S0601", "pipeline": "solidcraft", "outcome": "built", "link": ""}
-{"id": "S0602", "pipeline": "fusion-dutchman", "outcome": "failed", "link": "https://github.com/dutchman-cad/dutchman/issues/123"}
+{"id": "S0601", "pipeline": "solidcraft", "outcome": "correct", "version": "solidcraft 0.123.0", "link": ""}
+{"id": "S0602", "pipeline": "fusion-dutchman", "outcome": "wrong-result", "version": "dutchman 0.45.0", "link": "https://github.com/dutchman-cad/dutchman/issues/123"}
 ```
 
 - `pipeline`: `solidcraft` or `fusion-dutchman`
-- `outcome`: `built`, `failed`, or `skipped`
+- `outcome`: one of the outcomes above
+- `version`: the SolidCraft release or commit, or the Dutchman version, so a result can be rerun on a newer build
 - `link`: the issue or PR for a failure, empty otherwise
 
 ## File failures
 
-File every failure as its own issue in the repo where the bug lives, and put the item ID (for example `S0602`) in the title:
+Group first, then file. Many items fail for one cause, and one issue per cause is far easier to fix than one per item.
+
+1. Collect the failures from your batch and group them by signature: the error message (or the kind of wrong result) plus the axis values the items share.
+2. In each group, shrink to the smallest failing item: drop steps, round the dimensions, and find the boundary (for example the gap value where it starts to fail).
+3. File one issue per cause, in the repo where the bug lives, with the smallest failing item's brief and the IDs of every item in the group (for example `S0602, S0777, S4410`). Put the smallest item's ID in the title.
+
+Where the bug lives:
 
 - SolidCraft could not build it or built it wrong: `tangency-labs/solidcraft`
 - Dutchman converted it wrongly: `dutchman-cad/dutchman`
 - The file reader or writer is at fault: `cadmpeg/cadmpeg`
 
-Before you file, search that repo for an existing issue about the same problem (search the symptom and the operation name). If one exists, comment on it with the item ID instead of opening a new one.
+Before you file, search that repo for an existing issue about the same problem (search the symptom and the operation name). If one exists, comment on it with the item IDs instead of opening a new one. Do not file `correct-refusal` results: they are expected.
 
 ## Fusion files stay private
 
