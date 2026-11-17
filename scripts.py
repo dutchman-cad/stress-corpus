@@ -675,7 +675,7 @@ def check_one(cli, tmp, r):
     except subprocess.TimeoutExpired:
         step = hang_step(cli, tmp, r) or "the whole script"
         return {"id": r["id"], "outcome": "hang", "detail": "no result in %d s, running %s" % (TIMEOUT_S, step),
-                "signature": "no result in %d s @ %s" % (TIMEOUT_S, step)}
+                "signature": "no result within %d s @ %s" % (TIMEOUT_S, step)}
     text = p.stderr + p.stdout
     if p.returncode != 0:
         if "panick" in text.lower() or p.returncode not in (1, 2):
