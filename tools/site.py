@@ -290,7 +290,8 @@ svg text{fill:var(--mut);font-size:10px}
 <li>Build the items in SolidCraft, by hand or with the generated scripts (<a href="@@REPO@@#two-ways-to-build-an-item">two ways to build an item</a>).</li>
 <li>Open a results PR. When its checks pass it merges by itself, and this page updates within the hour.</li>
 </ol>
-<p><a href="@@REPO@@">Repository</a> &middot; <a href="@@REPO@@#take-part">How to take part</a> &middot; <a href="@@REPO@@#record-results">Recording results</a> &middot; <a href="https://discord.gg/yTcseBEdeu">Questions: #stress-corpus on Discord</a></p>
+<p><a href="@@REPO@@">Repository</a> &middot; <a href="@@REPO@@#take-part">How to take part</a> &middot; <a href="@@REPO@@#record-results">Recording results</a></p>
+<p class="mut">Questions? <a href="@@REPO@@/issues/new">Open an issue</a>, or talk to the people working on it: <a href="https://discord.gg/yTcseBEdeu">join the Dutchman CAD Discord</a> and type <code>/stress-test</code>, which lets you into the #stress-corpus channel.</p>
 </div>
 
 <div class="bar"><span class="seg" id="pipes" role="group" aria-label="Pipeline"></span>
