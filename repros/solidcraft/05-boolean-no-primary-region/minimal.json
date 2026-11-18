@@ -1,0 +1,318 @@
+[
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 1,
+        "kernel_piece_order": true,
+        "name": "Sketch",
+        "plane": {
+          "name": "XY",
+          "type": "origin"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "c": 0,
+              "id": "k1",
+              "param": "Constraint1_4",
+              "type": "radius",
+              "value": 1.5
+            },
+            {
+              "id": "k2",
+              "p": 1,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "c": 1,
+              "construction": false,
+              "id": "c1",
+              "r": 1.5,
+              "type": "circle"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "1.5000000000000000",
+          "name": "Constraint1_4",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "body_names": [
+          "Body1"
+        ],
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "positive",
+          "distance": "4 mm"
+        },
+        "id": 2,
+        "kernel_piece_order": true,
+        "name": "Pad",
+        "operation": "new_body",
+        "param_names": [
+          "d1"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 1,
+        "suppressed": false,
+        "type": "extrude"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 3,
+        "kernel_piece_order": true,
+        "name": "Sketch001",
+        "plane": {
+          "plane": {
+            "origin": [
+              1.2,
+              -0.179995,
+              4.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "c": 0,
+              "id": "k1",
+              "param": "Constraint1",
+              "type": "radius",
+              "value": 0.18
+            },
+            {
+              "id": "k2",
+              "p": 1,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "c": 1,
+              "construction": false,
+              "id": "c1",
+              "r": 0.18,
+              "type": "circle"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "0.1800000000000000",
+          "name": "Constraint1",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "positive",
+          "distance": "0.36 mm"
+        },
+        "id": 4,
+        "kernel_piece_order": true,
+        "name": "Pad001",
+        "operation": "join",
+        "param_names": [
+          "d2"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 3,
+        "suppressed": false,
+        "touching": "one_body",
+        "type": "extrude"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 5,
+        "kernel_piece_order": true,
+        "name": "Sketch002",
+        "plane": {
+          "plane": {
+            "origin": [
+              1.2,
+              0.179995,
+              4.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "c": 0,
+              "id": "k1",
+              "param": "Constraint1_2",
+              "type": "radius",
+              "value": 0.18
+            },
+            {
+              "id": "k2",
+              "p": 1,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "c": 1,
+              "construction": false,
+              "id": "c1",
+              "r": 0.18,
+              "type": "circle"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "0.1800000000000000",
+          "name": "Constraint1_2",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "positive",
+          "distance": "0.36 mm"
+        },
+        "id": 6,
+        "kernel_piece_order": true,
+        "name": "Pad002",
+        "operation": "join",
+        "param_names": [
+          "d3"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 5,
+        "suppressed": false,
+        "touching": "one_body",
+        "type": "extrude"
+      }
+    }
+  }
+]

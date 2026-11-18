@@ -1,0 +1,9 @@
+[
+  {
+    "command": "file.insert_step",
+    "params": {
+      "path": "minimal.step",
+      "name": "Original geometry (imported)"
+    }
+  }
+]

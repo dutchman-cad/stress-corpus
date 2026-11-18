@@ -1,0 +1,725 @@
+[
+  {
+    "command": "parameters.add",
+    "params": {
+      "expression": "-1901.0000000000000000",
+      "name": "Constraint11",
+      "unit": "mm"
+    }
+  },
+  {
+    "command": "parameters.add",
+    "params": {
+      "expression": "-1901.0000000000000000",
+      "name": "Constraint12",
+      "unit": "mm"
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 1,
+        "kernel_piece_order": true,
+        "name": "Sketch",
+        "plane": {
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              -0.0,
+              2.220446049250313e-16,
+              1.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "c": 0,
+              "id": "k1",
+              "param": "Constraint1_2",
+              "type": "radius",
+              "value": 400.0
+            },
+            {
+              "id": "k2",
+              "p": 2,
+              "param": "Constraint2",
+              "q": 1,
+              "type": "distance_x",
+              "value": 1500.0
+            },
+            {
+              "id": "k3",
+              "p": 2,
+              "param": "Constraint3",
+              "q": 1,
+              "type": "distance_y",
+              "value": 0.0
+            },
+            {
+              "id": "k4",
+              "p": 2,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "c": 1,
+              "construction": false,
+              "id": "c1",
+              "r": 400.0,
+              "type": "circle"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                1500.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p2",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "400.0000000000000000",
+          "name": "Constraint1_2",
+          "unit": "mm"
+        },
+        {
+          "expression": "1500.0000000000000000",
+          "name": "Constraint2",
+          "unit": "mm"
+        },
+        {
+          "expression": "0.0000000000000000",
+          "name": "Constraint3",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "angle": "360 deg",
+        "axis": {
+          "dir": [
+            0.0,
+            2e-16,
+            1.0
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "type": "line"
+        },
+        "body_names": [
+          "Body1"
+        ],
+        "convention": "sketch_normal",
+        "id": 2,
+        "kernel_piece_order": true,
+        "name": "Revolution",
+        "operation": "join",
+        "param_names": [
+          "d1"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 1,
+        "suppressed": false,
+        "touching": "one_body",
+        "type": "revolve"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 3,
+        "kernel_piece_order": true,
+        "name": "Sketch001",
+        "plane": {
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              -401.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "id": "k1",
+              "l": 1,
+              "param": "Constraint10",
+              "type": "length",
+              "value": 3802.0
+            },
+            {
+              "id": "k2",
+              "p": 5,
+              "param": "Constraint11_magnitude",
+              "q": 1,
+              "type": "distance_x",
+              "value": 1901.0
+            },
+            {
+              "id": "k3",
+              "p": 5,
+              "param": "Constraint12_magnitude",
+              "q": 1,
+              "type": "distance_y",
+              "value": 1901.0
+            },
+            {
+              "id": "k4",
+              "l": 0,
+              "type": "horizontal"
+            },
+            {
+              "id": "k5",
+              "l": 1,
+              "type": "vertical"
+            },
+            {
+              "id": "k6",
+              "l": 2,
+              "type": "horizontal"
+            },
+            {
+              "id": "k7",
+              "l": 3,
+              "type": "vertical"
+            },
+            {
+              "id": "k8",
+              "l": 0,
+              "param": "Constraint9",
+              "type": "length",
+              "value": 3802.0
+            },
+            {
+              "id": "k9",
+              "p": 5,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "a": 1,
+              "b": 2,
+              "construction": false,
+              "id": "l1",
+              "type": "line"
+            },
+            {
+              "a": 2,
+              "b": 3,
+              "construction": false,
+              "id": "l2",
+              "type": "line"
+            },
+            {
+              "a": 3,
+              "b": 4,
+              "construction": false,
+              "id": "l3",
+              "type": "line"
+            },
+            {
+              "a": 4,
+              "b": 1,
+              "construction": false,
+              "id": "l4",
+              "type": "line"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                -1901.0,
+                -1901.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p2",
+              "pos": [
+                1901.0,
+                -1901.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p3",
+              "pos": [
+                1901.0,
+                1901.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p4",
+              "pos": [
+                -1901.0,
+                1901.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p5",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "3802.0000000000000000",
+          "name": "Constraint10",
+          "unit": "mm"
+        },
+        {
+          "expression": "-(Constraint11)",
+          "name": "Constraint11_magnitude",
+          "unit": "mm"
+        },
+        {
+          "expression": "-(Constraint12)",
+          "name": "Constraint12_magnitude",
+          "unit": "mm"
+        },
+        {
+          "expression": "3802.0000000000000000",
+          "name": "Constraint9",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "negative",
+          "distance": "401 mm"
+        },
+        "id": 4,
+        "kernel_piece_order": true,
+        "name": "Pocket",
+        "operation": "cut",
+        "param_names": [
+          "d2"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 3,
+        "suppressed": false,
+        "type": "extrude"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 5,
+        "kernel_piece_order": true,
+        "name": "Sketch002",
+        "plane": {
+          "plane": {
+            "origin": [
+              1899.3937162045017,
+              47.9949043425656,
+              0.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "c": 0,
+              "id": "k1",
+              "param": "Constraint1",
+              "type": "radius",
+              "value": 48.0
+            },
+            {
+              "id": "k2",
+              "p": 1,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "c": 1,
+              "construction": false,
+              "id": "c1",
+              "r": 48.0,
+              "type": "circle"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "48.0000000000000000",
+          "name": "Constraint1",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "negative",
+          "distance": "200 mm"
+        },
+        "id": 6,
+        "kernel_piece_order": true,
+        "name": "Pocket001",
+        "operation": "cut",
+        "param_names": [
+          "d3"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 5,
+        "suppressed": false,
+        "type": "extrude"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 7,
+        "kernel_piece_order": true,
+        "name": "Sketch003",
+        "plane": {
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              -160.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "id": "k1",
+              "l": 1,
+              "param": "Constraint10_2",
+              "type": "length",
+              "value": 80.0
+            },
+            {
+              "id": "k2",
+              "p": 5,
+              "param": "Constraint11_2",
+              "q": 1,
+              "type": "distance_x",
+              "value": 1460.0
+            },
+            {
+              "id": "k3",
+              "p": 5,
+              "param": "Constraint12_2",
+              "q": 1,
+              "type": "distance_y",
+              "value": 80.0
+            },
+            {
+              "id": "k4",
+              "l": 0,
+              "type": "horizontal"
+            },
+            {
+              "id": "k5",
+              "l": 1,
+              "type": "vertical"
+            },
+            {
+              "id": "k6",
+              "l": 2,
+              "type": "horizontal"
+            },
+            {
+              "id": "k7",
+              "l": 3,
+              "type": "vertical"
+            },
+            {
+              "id": "k8",
+              "l": 0,
+              "param": "Constraint9_2",
+              "type": "length",
+              "value": 80.0
+            },
+            {
+              "id": "k9",
+              "p": 5,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "a": 1,
+              "b": 2,
+              "construction": false,
+              "id": "l1",
+              "type": "line"
+            },
+            {
+              "a": 2,
+              "b": 3,
+              "construction": false,
+              "id": "l2",
+              "type": "line"
+            },
+            {
+              "a": 3,
+              "b": 4,
+              "construction": false,
+              "id": "l3",
+              "type": "line"
+            },
+            {
+              "a": 4,
+              "b": 1,
+              "construction": false,
+              "id": "l4",
+              "type": "line"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                1460.0,
+                80.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p2",
+              "pos": [
+                1540.0,
+                80.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p3",
+              "pos": [
+                1540.0,
+                160.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p4",
+              "pos": [
+                1460.0,
+                160.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p5",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "80.0000000000000000",
+          "name": "Constraint10_2",
+          "unit": "mm"
+        },
+        {
+          "expression": "1460.0000000000000000",
+          "name": "Constraint11_2",
+          "unit": "mm"
+        },
+        {
+          "expression": "80.0000000000000000",
+          "name": "Constraint12_2",
+          "unit": "mm"
+        },
+        {
+          "expression": "80.0000000000000000",
+          "name": "Constraint9_2",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "positive",
+          "distance": "160 mm"
+        },
+        "id": 8,
+        "kernel_piece_order": true,
+        "name": "Boss1",
+        "operation": "join",
+        "param_names": [
+          "d4"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 7,
+        "suppressed": false,
+        "touching": "one_body",
+        "type": "extrude"
+      }
+    }
+  }
+]

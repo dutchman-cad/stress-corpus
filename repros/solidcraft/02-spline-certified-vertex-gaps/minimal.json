@@ -1,0 +1,526 @@
+[
+  {
+    "command": "parameters.add",
+    "params": {
+      "expression": "0.1200000000000000",
+      "name": "Constraint1",
+      "unit": "mm"
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 1,
+        "kernel_piece_order": true,
+        "name": "Outline",
+        "plane": {
+          "name": "XY",
+          "type": "origin"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "a": 0,
+              "b": 1,
+              "id": "k1",
+              "type": "tangent"
+            },
+            {
+              "a": 1,
+              "b": 2,
+              "id": "k2",
+              "type": "tangent"
+            },
+            {
+              "a": 2,
+              "b": 3,
+              "id": "k3",
+              "type": "tangent"
+            },
+            {
+              "a": 3,
+              "b": 4,
+              "id": "k4",
+              "type": "tangent"
+            },
+            {
+              "a": 4,
+              "b": 5,
+              "id": "k5",
+              "type": "tangent"
+            },
+            {
+              "a": 5,
+              "b": 6,
+              "id": "k6",
+              "type": "tangent"
+            },
+            {
+              "a": 6,
+              "b": 7,
+              "id": "k7",
+              "type": "tangent"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s1",
+              "pts": [
+                1,
+                2,
+                3,
+                4
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s2",
+              "pts": [
+                4,
+                5,
+                6,
+                7
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s3",
+              "pts": [
+                7,
+                8,
+                9,
+                10
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s4",
+              "pts": [
+                10,
+                11,
+                12,
+                13
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s5",
+              "pts": [
+                13,
+                14,
+                15,
+                16
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s6",
+              "pts": [
+                16,
+                17,
+                18,
+                19
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s7",
+              "pts": [
+                19,
+                20,
+                21,
+                22
+              ],
+              "type": "spline"
+            },
+            {
+              "construction": false,
+              "control": true,
+              "degree": 3,
+              "fixed": true,
+              "id": "s8",
+              "pts": [
+                22,
+                23,
+                24,
+                1
+              ],
+              "type": "spline"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                2.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p2",
+              "pos": [
+                2.018454036021937,
+                0.5884855965894988
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p3",
+              "pos": [
+                1.8237297697756447,
+                0.9528650285834209
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p4",
+              "pos": [
+                1.5099999999999998,
+                1.14
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p5",
+              "pos": [
+                1.1245443425409294,
+                1.3699183577399912
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p6",
+              "pos": [
+                0.5594481113967767,
+                1.3322835718326091
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p7",
+              "pos": [
+                -5.551115123125783e-17,
+                1.35
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p8",
+              "pos": [
+                -0.559448111396777,
+                1.367716428167391
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p9",
+              "pos": [
+                -1.1132481030461783,
+                1.4407840704095545
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p10",
+              "pos": [
+                -1.5099999999999998,
+                1.1400000000000001
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p11",
+              "pos": [
+                -1.8329239962643173,
+                0.8951860626879214
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p12",
+              "pos": [
+                -2.0518092043852807,
+                0.4027086360161276
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p13",
+              "pos": [
+                -2.0000000000000004,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p14",
+              "pos": [
+                -1.9497521442357761,
+                -0.3905724030630926
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p15",
+              "pos": [
+                -1.6448795986909825,
+                -0.6967051227908351
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p16",
+              "pos": [
+                -1.31,
+                -0.986
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p17",
+              "pos": [
+                -0.9013187671679307,
+                -1.3390504322508534
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p18",
+              "pos": [
+                -0.44794701968407996,
+                -1.6670236986728975
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p19",
+              "pos": [
+                0.0,
+                -1.6500000000000001
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p20",
+              "pos": [
+                0.44794701968407974,
+                -1.6329763013271028
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p21",
+              "pos": [
+                0.8904693115683888,
+                -1.2709556375592643
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p22",
+              "pos": [
+                1.31,
+                -0.9860000000000001
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p23",
+              "pos": [
+                1.6537698071109102,
+                -0.7525030300283188
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p24",
+              "pos": [
+                1.9821021042245237,
+                -0.5707506943525623
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "body_names": [
+          "Body1"
+        ],
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "positive",
+          "distance": "2 mm"
+        },
+        "id": 2,
+        "kernel_piece_order": true,
+        "name": "Pad",
+        "operation": "new_body",
+        "param_names": [
+          "d1"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 1,
+        "suppressed": false,
+        "type": "extrude"
+      }
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "id": 3,
+        "kernel_piece_order": true,
+        "name": "Sketch",
+        "plane": {
+          "plane": {
+            "origin": [
+              1.85499,
+              0.0,
+              1.0
+            ],
+            "x_dir": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_dir": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "custom"
+        },
+        "sketch": {
+          "constraints": [
+            {
+              "c": 0,
+              "id": "k1",
+              "param": "Constraint1_2",
+              "type": "radius",
+              "value": 0.145
+            },
+            {
+              "id": "k2",
+              "p": 1,
+              "q": 0,
+              "type": "coincident"
+            }
+          ],
+          "counters": {},
+          "curves": [
+            {
+              "c": 1,
+              "construction": false,
+              "id": "c1",
+              "r": 0.145,
+              "type": "circle"
+            }
+          ],
+          "points": [
+            {
+              "fixed": true,
+              "id": "origin",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "fixed": false,
+              "id": "p1",
+              "pos": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        "suppressed": false,
+        "type": "sketch"
+      },
+      "params": [
+        {
+          "expression": "0.1450000000000000",
+          "name": "Constraint1_2",
+          "unit": "mm"
+        }
+      ]
+    }
+  },
+  {
+    "command": "timeline.add",
+    "params": {
+      "feature": {
+        "extent": {
+          "convention": "legacy_per_side",
+          "direction": "negative",
+          "distance": "1 mm"
+        },
+        "id": 4,
+        "kernel_piece_order": true,
+        "name": "Pocket",
+        "operation": "cut",
+        "param_names": [
+          "d2"
+        ],
+        "profiles": {
+          "type": "all"
+        },
+        "sketch": 3,
+        "suppressed": false,
+        "type": "extrude"
+      }
+    }
+  }
+]
