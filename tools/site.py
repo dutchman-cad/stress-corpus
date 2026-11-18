@@ -308,6 +308,18 @@ td.e{color:var(--mut)}
 .ol{display:inline-block;width:12px;height:12px;border:2px solid var(--fg);vertical-align:-2px;margin-right:4px}
 .ol.r{border-color:var(--fail)}
 
+.route-table{width:100%;table-layout:fixed;font-size:.95rem}
+.route-table th,.route-table td{white-space:normal;padding:10px 12px;vertical-align:middle}
+.route-table th:first-child{width:48%;text-align:left}
+.route-table thead th{font-size:1.05rem}
+.route-table tbody td{font-weight:650;font-variant-numeric:tabular-nums}
+.route-table small{display:block;color:var(--mut);font-size:.8rem;font-weight:400;margin-top:2px}
+.route-table .built td{font-size:1.25rem}
+.route-table caption{text-align:left;color:var(--mut);caption-side:bottom;padding-top:10px;font-size:.85rem}
+#solidcraft-vs-freecad{scroll-margin-top:16px}
+#solidcraft-vs-freecad .card{padding:12px}
+@media(max-width:480px){.route-table th,.route-table td{padding:8px 5px}.route-table thead th{font-size:.9rem}.route-table{font-size:.85rem}.route-table .built td{font-size:1.1rem}}
+
 .take ol{margin:.4em 0 .8em 1.2em;padding:0}
 .take li{margin:.25em 0}
 footer{margin:2em 0 1em;color:var(--mut);font-size:.9rem}
@@ -331,10 +343,16 @@ svg text{fill:var(--mut);font-size:10px}
 <p class="mut">Questions? <a href="@@REPO@@/issues/new">Open an issue</a>, or talk to the people working on it: <a href="https://discord.gg/yTcseBEdeu">join the Dutchman CAD Discord</a> and type <code>/stress-test</code>, which lets you into the #stress-corpus channel.</p>
 </div>
 
-<div class="bar"><span class="seg" id="pipes" role="group" aria-label="Pipeline"></span>
-<span class="legend" id="legend"></span></div>
+<section id="solidcraft-vs-freecad" aria-labelledby="route-title">
+<h2 id="route-title"><a href="#solidcraft-vs-freecad">SolidCraft vs FreeCAD: all 10,000 items</a></h2>
+<p class="mut">The same tasks, two routes: built directly in SolidCraft, or built in FreeCAD and converted with Dutchman.</p>
+<div class="card"><table class="route-table" id="route-comparison" aria-labelledby="route-title"></table></div>
+</section>
 
 <h2>The grid</h2>
+<div class="bar"><span class="seg" id="pipes" role="group" aria-label="Grid route"></span></div>
+<p class="mut" id="gridroute" aria-live="polite"></p>
+<div class="bar"><span class="legend" id="legend"></span></div>
 <div class="card"><div id="gridwrap"><canvas id="grid" aria-label="Grid of all 10,000 tasks"></canvas></div>
 <div id="detail" class="mut">Hover or tap a cell for details.</div></div>
 <div id="tip"></div>
@@ -378,7 +396,7 @@ var HANG={4:1,5:1};
 var NAMES=["Correct","Correct refusal","Wrong result","Wrong refusal","Hang","Crash","Skipped","Source failed"];
 var pipes=Object.keys(D.results); if(!pipes.length)pipes=["solidcraft"];
 pipes.sort(function(a,b){return a==="solidcraft"?-1:b==="solidcraft"?1:a<b?-1:1});
-var cur=pipes[0];
+var cur=pipes.indexOf("solidcraft")>=0?"solidcraft":pipes[0];
 var $=function(id){return document.getElementById(id)};
 function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
 function pct(a,b){return b?(100*a/b).toFixed(1)+"%":"-"}
@@ -390,8 +408,8 @@ function label(p){return p==="solidcraft"?"SolidCraft":p==="fusion-dutchman"?"Fu
 function buildPipes(){
   var el=$("pipes"); el.innerHTML="";
   if(pipes.length<2){el.style.display="none";return}
-  pipes.forEach(function(p){var b=document.createElement("button");b.textContent=label(p);
-    b.setAttribute("aria-pressed",p===cur);b.onclick=function(){cur=p;buildPipes();all()};el.appendChild(b)});
+  pipes.forEach(function(p){var b=document.createElement("button");b.textContent=p==="freecad-dutchman"?"FreeCAD":label(p);
+    b.setAttribute("aria-pressed",p===cur);b.onclick=function(){cur=p;$("detail").textContent="Hover or tap a cell for details.";$("tip").style.display="none";buildPipes();all()};el.appendChild(b)});
 }
 function legend(){
   $("legend").innerHTML=[["pass","Pass"],["fail","Fail"],["hang","Hang or crash"],["skip","Skipped"],["source","Source failed"],["none","Not started"]].map(function(x){
@@ -443,10 +461,32 @@ function wire(){
   cv.addEventListener("click",function(e){var n=cellAt(e);if(n<0)return;var d=describe(n);
     $("detail").innerHTML=d.h+(d.link?'<br><a href="'+esc(d.link)+'">Issue</a>':"")});
 }
-function counts(){
-  var c=OUT.map(function(){return 0});
-  for(var k in (D.results[cur]||{}))c[D.results[cur][k][0]]++;
+function counts(pipe){
+  var c=OUT.map(function(){return 0}),R=D.results[pipe||cur]||{};
+  for(var k in R)c[R[k][0]]++;
   return c;
+}
+function routeComparison(){
+  var routes=["solidcraft","freecad-dutchman"],cs=routes.map(counts);
+  var rows=[["Items built","Tasks with a downstream outcome; excludes skipped tasks and source failures.",function(c){return c.slice(0,6).reduce(function(a,b){return a+b},0)}]];
+  [[0,"The result matches the expected measurements."],
+   [1,"An invalid task was refused as expected."],
+   [2,"It built, but the result differs from the expected measurements."],
+   [3,"A valid task was refused."],
+   [4,"The run did not finish within the time limit."],
+   [5,"The program stopped unexpectedly."],
+   [7,"The source program itself could not build the task."],
+   [6,"The task is not expressible by this route yet."]].forEach(function(x){
+    if(x[0]===5&&!cs.some(function(c){return c[5]}))return;
+    rows.push([NAMES[x[0]],x[1],function(c){return c[x[0]]}]);
+  });
+  var h='<caption>Latest committed result per item and route, using the same counts as Totals below. Each route covers '+N.toLocaleString()+' tasks. Missing history measurements mean “Not recorded”.</caption>'
+    +'<thead><tr><th scope="col">Outcome</th><th scope="col">SolidCraft<small>Direct build</small></th><th scope="col">FreeCAD<small>via Dutchman</small></th></tr></thead><tbody>';
+  rows.forEach(function(row,i){h+='<tr'+(i===0?' class="built"':'')+'><th scope="row">'+esc(row[0])+'<small>'+esc(row[1])+'</small></th>'
+    +cs.map(function(c){return '<td>'+row[2](c).toLocaleString()+'</td>'}).join("")+'</tr>'});
+  h+='<tr><th scope="row">History features kept / total<small>Features mapped into editable history out of all reported source features.</small></th>'
+    +routes.map(function(p){var t=(D.history||{})[p];return '<td>'+(t?t.mapped.toLocaleString()+' / '+t.total.toLocaleString()+'<small>'+pct(t.mapped,t.total)+'</small>':'<span class="mut">Not recorded</span>')+'</td>'}).join("")+'</tr></tbody>';
+  $("route-comparison").innerHTML=h;
 }
 function totals(){
   var c=counts(),done=0,fails=0;
@@ -654,8 +694,8 @@ function causeTable(){
     h+='<tr><td style="text-align:left;white-space:normal;min-width:220px">'+c+'</td><td>'+g.items.length+'</td><td style="text-align:left;white-space:normal">'+esc(g.items.join(" "))+'</td></tr>'});
   $("causes").innerHTML=groups.length?h:'<tr><td>No current failures for this pipeline.</td></tr>';
 }
-function all(){causeTable();drawGrid();totals();tables();sankey();issueTable();compare();fixedSince()}
-legend();buildPipes();wire();all();
+function all(){$("gridroute").textContent=label(cur)+" · the grid and breakdowns below show this route.";$("grid").setAttribute("aria-label",label(cur)+": grid of all "+N.toLocaleString()+" tasks");causeTable();drawGrid();totals();tables();sankey();issueTable();compare();fixedSince()}
+routeComparison();legend();buildPipes();wire();all();
 var rt;addEventListener("resize",function(){clearTimeout(rt);rt=setTimeout(function(){drawGrid();compare()},100)});
 if(matchMedia)matchMedia("(prefers-color-scheme:dark)").addEventListener("change",all);
 </script>
