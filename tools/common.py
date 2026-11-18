@@ -5,8 +5,8 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTCOMES = {"correct", "wrong-result", "correct-refusal", "wrong-refusal",
-            "crash", "hang", "skipped"}
-PIPELINES = {"solidcraft", "fusion-dutchman"}
+            "crash", "hang", "skipped", "source-failed"}
+PIPELINES = {"solidcraft", "fusion-dutchman", "freecad-dutchman"}
 # Outcomes that count as a failure to be grouped and filed.
 FAILURES = {"wrong-result", "wrong-refusal", "crash", "hang"}
 REL_TOL = 1e-6
