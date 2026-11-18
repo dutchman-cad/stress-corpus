@@ -46,6 +46,8 @@ def check_line(rec, items, where):
         if not isinstance(sig, str) or not sig.strip():
             errs.append(f"{where}: outcome {outcome!r} needs a \"signature\": the first error or "
                         "refusal message, then \" @ \" and the failing operation or command")
+    if outcome == "source-failed" and pipeline != "freecad-dutchman":
+        errs.append(f"{where}: source-failed is only valid for freecad-dutchman")
     measured = rec.get("measured")
     if measured is not None:
         if not isinstance(measured, dict):

@@ -71,6 +71,81 @@ Combinations that cannot be built (for example a sheet-metal bend on a sphere) a
 - `python3 scripts.py --check path/to/solidcraft-cli scripts/batch-07.jsonl [--jobs J] [--results results/batch-07.jsonl]` runs each script with `--param-check strict`, J at a time. It writes `check.jsonl` with one of the outcomes below and the detail per item, and with `--results`, the batch's results file, with the `signature`, `measured` and `build` fields that `tools/check_results.py` checks. An item without a script comes out `skipped`. Without a closed-form `volume_mm3`, only the body count is checked, and the detail says so.
 - This version covers the steps that map straight onto SolidCraft commands: 9,777 of the 10,000 items. It doesn't yet cover a flange along part of a spline sheet's edge, a blend after a sheet is bent, a blend of a loop whose edges are under the tolerance (a rotated pad's corner just past the edge), or a variable fillet of a torus loop that a seam notch splits. Build those by hand from the brief. A pattern along a path is read as N holes in all for "repeat it N times" (as the circular pattern's expected volume counts them), along an arc that leaves C toward +X. On a spline outline, the seam notch's distance along the edge and the bounding-box centre come from the spline as SolidCraft builds it: a periodic cubic through the points, parameterised by chord length.
 
+### FreeCAD through Dutchman
+
+`freecad.py` imports `gen` and reuses `scripts.py`'s numeric step specification to
+build the same items as standalone FreeCAD Python macros. Each supported macro
+creates PartDesign Bodies with Sketcher constraints and real feature history,
+saves `<id>.FCStd`, and exports the final bodies to `<id>.step` in its working
+directory. It does not substitute a final BREP for the feature tree. This version
+uses no Part workbench solid primitives; future fallbacks must carry
+`"history": "partial"` in the generated line.
+
+```sh
+python3 freecad.py --batch 1
+python3 freecad.py --run freecad/batch-01.jsonl --freecad /path/to/FreeCADCmd --dutchman /path/to/dutchman --cli /path/to/solidcraft-cli --jobs 3 --timeout 600 --results /path/to/batch01-results.jsonl
+```
+
+For a FreeCAD app installed in `/Applications` on macOS (with `dutchman` on PATH):
+
+```sh
+python3 freecad.py --batch 1
+python3 freecad.py --run freecad/batch-01.jsonl --freecad /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd --dutchman dutchman --cli ~/.local/bin/solidcraft-cli --jobs 3 --timeout 600 --results ~/builds/fc-corpus/batch01-results.jsonl
+```
+
+Without `--batch`, generation writes all 10,000 records to `freecad.jsonl`.
+Batch generation writes `freecad/batch-NN.jsonl`; every record has `id`, `macro`
+(or null), `unsupported` (or null), and the original `expected` object. An
+unsupported reason names the first step without an implemented mapping. The
+current generator emits macros for 5,213 items and explicit unsupported records
+for 4,787 (chiefly 2,513 closed-shell steps, 488 splits, and 472 face offsets). Current
+limits include closed shells without removed faces, variable fillets, path
+patterns, modeled threads, split bodies, offset faces, sheet metal, and polar
+patterns about an offset axis. Additional limitations inherited from `scripts.py`
+are reported explicitly. Unsupported items are `skipped`, never refusals.
+
+The runner builds each macro in its own temporary directory, checks FreeCAD's
+final volume/body count against `expected`, converts the FCStd with
+`dutchman convert INPUT.FCStd OUTPUT.sc --json`, and measures the `.sc` using
+`solidcraft-cli run --param-check strict`. FreeCAD build errors, invalid shapes,
+source expectation mismatches, and source timeouts are `source-failed`; they are
+not attributed to Dutchman or SolidCraft. Downstream timeouts are `hang` and
+signal exits/panics are `crash`. Other downstream errors use `refusal_ok`.
+`--timeout` bounds each of the three stages (600 seconds by default), and kills
+its entire process group on timeout. The runner is intended for Linux/macOS.
+
+Results use pipeline `freecad-dutchman`, retain all three releases in `version`
+and `versions`, and include `source_measured` and Dutchman's `history` counts
+(`mapped` / `total`, null if no summary was returned). Conversion diagnostics
+are retained under `conversion`. Measurements use the same summary parser as
+`scripts.py` and the result validator's relative volume tolerance of 1e-6.
+Where no closed-form volume exists, `correct` checks the body count only and
+`detail` states that geometry was not inspected. Results are flushed as items
+finish and sorted by ID on completion. Generated macros, documents, and local
+reports need not be committed.
+
+For an extracted Linux AppImage, use a launcher that sets `PYTHONHOME` to
+`<extraction>/usr` and `LD_LIBRARY_PATH` to `<extraction>/usr/lib`, then executes
+`<extraction>/usr/bin/freecadcmd`. This uses only a user-level download. Set
+`FREECAD_CMD` to this launcher when running
+`python3 -m unittest discover -s tests` to include real headless API smoke tests.
+
+Validated on Linux with FreeCAD 1.1.4, Dutchman 0.2.10, and solidcraft-cli
+0.44.1. Batch 01 with three workers: 2 correct, 37 wrong-result, 1 wrong-refusal,
+20 source-failed, and 40 skipped; the result validator accepts all 100 lines.
+The external run report is not committed. All 10,000 generator records were
+classified, and every supported macro passed Python compilation.
+
+Clean-room API references: [Sketcher scripting](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/Sketcher_scripting.html),
+[Pad](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_Pad.html),
+[Revolution](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_Revolution.html),
+[Thickness](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_Thickness.html),
+[Boolean](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_Boolean.html),
+[LinearPattern](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_LinearPattern.html),
+and [AdditivePipe](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_AdditivePipe.html).
+The macros were written from documentation and runtime API inspection, without
+reading or downloading FreeCAD source code.
+
 ## Take part
 
 1. Open the issues labelled `batch`. Each is a batch of 100 items: "Batch 07: S0601–S0700".
@@ -96,6 +171,7 @@ You can do either or both. Say which in the results.
 | `crash` | The program crashed or panicked. |
 | `hang` | It did not finish within 10 minutes. Stop it, record the step it stuck on as the signature, and go on to the next item. |
 | `skipped` | Not attempted. |
+| `source-failed` | FreeCAD could not build the source document correctly (FreeCAD route only). |
 
 Items with no `volume_mm3` cannot be called `correct` from the number alone: check the body count and look at the part, and say what you checked.
 
@@ -108,7 +184,7 @@ Add a pull request with `results/<batch>.jsonl` (for example `results/batch-07.j
 {"id": "S0602", "pipeline": "fusion-dutchman", "outcome": "wrong-result", "version": "dutchman 0.45.0", "link": "https://github.com/dutchman-cad/dutchman/issues/123"}
 ```
 
-- `pipeline`: `solidcraft` or `fusion-dutchman`
+- `pipeline`: `solidcraft`, `fusion-dutchman`, or `freecad-dutchman`
 - `outcome`: one of the outcomes above
 - `version`: the SolidCraft release or commit, or the Dutchman version, so a result can be rerun on a newer build
 - `link`: an existing issue or PR for the failure, empty otherwise

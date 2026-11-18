@@ -2,3 +2,6 @@ check.jsonl
 scripts.jsonl
 __pycache__/
 site/
+freecad/
+freecad.jsonl
+fc-check.jsonl
