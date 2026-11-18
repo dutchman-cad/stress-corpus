@@ -116,13 +116,24 @@ its entire process group on timeout. The runner is intended for Linux/macOS.
 
 Results use pipeline `freecad-dutchman`, retain all three releases in `version`
 and `versions`, and include `source_measured` and Dutchman's `history` counts
-(`mapped` / `total`, null if no summary was returned). Conversion diagnostics
+(`mapped` / `total`, plus `partial`, null if no summary was returned). Dutchman's
+JSON `mode` distinguishes `history` from `partial_history`. In partial-history
+outputs, `document.json` in the `.sc` marks editable-prefix components with
+`history_hidden: true`. Measurement uses a temporary copy retaining only the
+public import features outside that component and its descendants, with their
+original STEP blobs and placements. Their IDs and names are recorded under
+`history.final_imports`; no body is selected by a guessed name, list position, or
+volume. Full-history outputs measure all bodies. Incomplete history is recorded
+in `history`, without causing a geometry failure. Every `wrong-result` includes
+source and converted volumes and body counts in `detail`. Conversion diagnostics
 are retained under `conversion`. Measurements use the same summary parser as
 `scripts.py` and the result validator's relative volume tolerance of 1e-6.
 Where no closed-form volume exists, `correct` checks the body count only and
 `detail` states that geometry was not inspected. Results are flushed as items
-finish and sorted by ID on completion. Generated macros, documents, and local
-reports need not be committed.
+finish to an append-only, fsynced result log. Existing finished IDs (including
+unsupported and failed items) are skipped on resume. A torn final JSON write is
+removed before appending; malformed completed lines and concurrent writers are
+rejected. Generated macros, documents, and local reports need not be committed.
 
 For an extracted Linux AppImage, use a launcher that sets `PYTHONHOME` to
 `<extraction>/usr` and `LD_LIBRARY_PATH` to `<extraction>/usr/lib`, then executes
@@ -131,10 +142,44 @@ For an extracted Linux AppImage, use a launcher that sets `PYTHONHOME` to
 `python3 -m unittest discover -s tests` to include real headless API smoke tests.
 
 Validated on Linux with FreeCAD 1.1.4, Dutchman 0.2.10, and solidcraft-cli
-0.44.1. Batch 01 with three workers: 2 correct, 37 wrong-result, 1 wrong-refusal,
-20 source-failed, and 40 skipped; the result validator accepts all 100 lines.
+0.44.1. Batch 01 with four workers and partial-history selection: 38 correct,
+1 wrong-result, 1 wrong-refusal, 20 source-failed, and 40 skipped; the result
+validator accepts all 100 lines. S0087 loses one of two bodies and remains a
+wrong result. S0008's final imported geometry has the expected body count and
+matches the source volume; its earlier large measurement included the prefix.
 The external run report is not committed. All 10,000 generator records were
 classified, and every supported macro passed Python compilation.
+
+#### Resumable Linux host run
+
+`tools/run_fc_corpus.sh` bootstraps the FreeCAD 1.1.4 AppImage and Dutchman 0.2.10
+Linux x86_64 binaries without a system install, then runs all 100 batches with
+`--jobs 4`. It uses `~/.local/bin/solidcraft-cli`. All downloads, extracted
+binaries, and work files live under `~/xpswork/fc-corpus`; downloaded archives
+are removed after extraction. Results append per batch to
+`~/xpswork/fc-corpus/results/fc-batch-NN.jsonl`. Pending macros are generated
+on demand; there is no need to write 10,000 macro files first. Each item's
+working directory is removed immediately after its measurement or failure.
+
+The bootstrap checks for 26 GiB free before installation (20 GiB floor plus
+installation headroom), or 21 GiB when binaries are already installed. The
+runner checks for 21 GiB before admitting each item. It stops without marking
+pending items finished if space is insufficient. Free space and rerun the same
+command to resume; it never removes unrelated files. A root run lock prevents
+two bootstrap runs sharing the workspace.
+
+On xps-aurora, with this checkout at `~/xpswork/fc-corpus/stress-corpus`:
+
+```sh
+nohup bash ~/xpswork/fc-corpus/stress-corpus/tools/run_fc_corpus.sh > ~/xpswork/fc-corpus/run.log 2>&1 < /dev/null &
+```
+
+Alternatively, use `python3 freecad.py --all-batches --freecad PATH --dutchman PATH
+--cli PATH --jobs 4 --work-dir ~/xpswork/fc-corpus` with existing installations.
+The runner defaults to four workers, a 600-second timeout per stage, and a 20 GiB
+free-space floor (`--min-free-gb`). `--run FILE` also supports this workspace and
+resume behavior. Starting a fresh measurement run requires a fresh results file;
+an older report is deliberately not overwritten.
 
 Clean-room API references: [Sketcher scripting](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/Sketcher_scripting.html),
 [Pad](https://reqrefusion.github.io/FreeCAD-Documentation-html/wiki/PartDesign_Pad.html),

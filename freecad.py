@@ -5,11 +5,15 @@ Geometry numbers and step ordering come from gen via scripts.script_for. No Free
 implementation sources are used. See README for the documented API references.
 """
 import argparse
+from contextlib import contextmanager
+import fcntl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
+import zipfile
 import subprocess
 import sys
 import tempfile
@@ -372,22 +376,59 @@ def process(args, cwd, timeout):
 
 
 def history_counts(data):
-    """Dutchman's JSON history summary (kept separate from geometry measurements)."""
-    if isinstance(data, dict):
-        for key in ("history", "history_mapping"):
-            h = data.get(key)
-            if isinstance(h, dict) and "mapped" in h and "total" in h:
-                return {"mapped": h["mapped"], "total": h["total"]}
-        for v in data.values():
-            found = history_counts(v)
-            if found is not None:
-                return found
-    elif isinstance(data, list):
-        for v in data:
-            found = history_counts(v)
-            if found is not None:
-                return found
-    return None
+    """Use Dutchman's reported conversion mode, not an inferred mapped/total ratio."""
+    if not isinstance(data, dict):
+        return None
+    h = data.get("history")
+    if not isinstance(h, dict):
+        return None
+    return {"mapped": h["mapped"], "total": h["total"],
+            "partial": data.get("mode") == "partial_history"}
+
+
+def final_shape_design(source, destination):
+    """Exclude the editable prefix marked history_hidden in Dutchman's .sc.
+
+    Observed in Dutchman 0.2.10: partial_history places the editable prefix in
+    a history_hidden component and the final geometry in public import features.
+    Preserve those imports, blobs, placements and public assembly occurrences.
+    Never select a body by its display name, order, size, or proximity to expected.
+    """
+    with zipfile.ZipFile(source) as zin:
+        doc = json.loads(zin.read("document.json"))
+        components = doc.get("components", [])
+        hidden = {c["id"] for c in components if c.get("history_hidden") is True}
+        if not hidden:
+            raise ValueError("partial history has no history_hidden component")
+        while True:
+            descendants = {c["id"] for c in components if c.get("parent") in hidden}
+            if descendants <= hidden:
+                break
+            hidden.update(descendants)
+        public = [f for f in doc["features"] if f.get("component", 0) not in hidden]
+        imports = [f for f in public if f.get("type") == "import" and not f.get("suppressed", False)]
+        if not imports or len(imports) != len(public):
+            raise ValueError("partial history public features are not exclusively final imports")
+        if not all(f.get("step_blob") in zin.namelist() for f in imports):
+            raise ValueError("final import has no embedded STEP blob")
+        doc["features"] = imports
+        doc["components"] = [c for c in components if c["id"] not in hidden]
+        removed_occurrences = {o["id"] for o in doc.get("occurrences", []) if o.get("component") in hidden}
+        doc["occurrences"] = [o for o in doc.get("occurrences", []) if o["id"] not in removed_occurrences]
+        # Visibility references to the removed prefix do not belong to the measured copy.
+        doc.pop("visibility", None)
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+            for entry in zin.infolist():
+                if entry.filename == "document.json":
+                    zout.writestr(entry.filename, json.dumps(doc))
+                else:
+                    zout.writestr(entry, zin.read(entry.filename))
+    return [{"id": f["id"], "name": f.get("name", "")} for f in imports]
+
+
+def measurement_detail(source, converted):
+    return (f"source: {source['volume_mm3']:.12g} mm³, {source['bodies']} bodies; "
+            f"converted: {converted['volume_mm3']:.12g} mm³, {converted['bodies']} bodies")
 
 
 def compare(expected, measured):
@@ -398,6 +439,12 @@ def compare(expected, measured):
 
 
 def run_one(rec, args, versions, root):
+    # An item owns its directory; success, refusal, exception and timeout all clean it.
+    with tempfile.TemporaryDirectory(prefix=rec["id"] + "-", dir=root) as item_root:
+        return build_one(rec, args, versions, item_root)
+
+
+def build_one(rec, args, versions, root):
     result = dict(id=rec["id"], pipeline="freecad-dutchman", version="; ".join(versions.values()),
                   versions=dict(versions), build=versions["dutchman"], link="")
     if not rec["macro"]:
@@ -433,8 +480,15 @@ def run_one(rec, args, versions, root):
         result["conversion"] = {k: v for k, v in data.items() if k not in ("names", "history")} if data else None
         if code:
             return failed(result, code, err + out, rec["expected"], stage)
+        stage = "select final imported shape"
+        if data is None or data.get("mode") not in ("history", "partial_history", "geometry"):
+            return dict(result, outcome="crash", signature="missing or unknown Dutchman conversion mode @ " + stage)
+        design = work / (iid + ".sc")
+        if data["mode"] == "partial_history":
+            design = work / (iid + "-final.sc")
+            result["history"]["final_imports"] = final_shape_design(work / (iid + ".sc"), design)
         stage = "solidcraft-cli run"
-        code, out, err = process([args.cli, "run", str(work / (iid + ".sc")), "--param-check", "strict"], work, args.timeout)
+        code, out, err = process([args.cli, "run", str(design), "--param-check", "strict"], work, args.timeout)
         if code:
             return failed(result, code, err + out, rec["expected"], stage)
         got = scripts.measured(out)
@@ -443,12 +497,15 @@ def run_one(rec, args, versions, root):
         meas = got[2]
         if not compare(rec["expected"], meas):
             return dict(result, outcome="wrong-result", measured=meas,
+                        detail=measurement_detail(source, meas),
                         signature=f"measured {meas}; expected {rec['expected']} @ result")
         return dict(result, outcome="correct", measured=meas,
                     detail="volume and body count" if "volume_mm3" in rec["expected"] else "body count only; geometry not inspected")
     except subprocess.TimeoutExpired:
         return dict(result, outcome="source-failed" if stage == "FreeCAD build" else "hang",
                     signature=f"no result within {args.timeout} s @ {stage}")
+    except (ValueError, KeyError, zipfile.BadZipFile) as e:
+        return dict(result, outcome="crash", signature=str(e) + " @ " + stage)
     except OSError as e:
         return dict(result, outcome="source-failed" if stage == "FreeCAD build" else "crash", signature=str(e) + " @ " + stage)
 
@@ -459,26 +516,98 @@ def failed(result, code, text, expected, stage):
     return dict(result, outcome=outcome, signature=(scripts.first_error(text) or f"exit {code}") + " @ " + stage)
 
 
+def check_disk(root, minimum_gb):
+    # Keep one GB of admission headroom above the requested floor for four builders.
+    free = shutil.disk_usage(root).free / 1024**3
+    if free < minimum_gb + 1:
+        raise OSError(f"{root}: {free:.2f} GiB free; need {minimum_gb + 1:g} GiB "
+                      f"to preserve {minimum_gb:g} GiB free; resume after freeing space")
+
+
+@contextmanager
+def result_log(path):
+    """Lock one append-only batch log and repair only an interrupted final write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as f:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        f.seek(0)
+        seen = set()
+        while True:
+            start = f.tell()
+            line = f.readline()
+            if not line:
+                break
+            try:
+                rec = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                if not line.endswith(b"\n") and not f.read(1):
+                    f.truncate(start)
+                    break
+                raise ValueError(f"{path}: malformed completed result line")
+            if rec.get("pipeline") != "freecad-dutchman" or not rec.get("outcome"):
+                raise ValueError(f"{path}: unexpected result record")
+            if rec["id"] in seen:
+                raise ValueError(f"{path}: duplicate completed ID {rec['id']}")
+            seen.add(rec["id"])
+            if not line.endswith(b"\n"):
+                f.seek(0, os.SEEK_END)
+                f.write(b"\n")
+        f.seek(0, os.SEEK_END)
+        yield f, seen
+
+
+def run_batch(args, recs, path, versions):
+    counts = {}
+    root = Path(args.work_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    with result_log(path) as (f, finished):
+        pending = [r for r in recs if r["id"] not in finished]
+        if not pending:
+            print(f"{path}: all {len(recs)} IDs already finished", file=sys.stderr)
+            return
+        check_disk(root, args.min_free_gb)
+        with tempfile.TemporaryDirectory(prefix="run-", dir=root) as tmp, \
+                ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            # Bounded submission prevents an entire corpus of item directories or
+            # macros from waiting on disk. Completed IDs are not generated again.
+            todo = iter(pending)
+            active = {}
+            def submit_next():
+                item = next(todo, None)
+                if item is None:
+                    return
+                check_disk(root, args.min_free_gb)
+                rec = record(item) if "macro" not in item else item
+                active[pool.submit(run_one, rec, args, versions, tmp)] = rec["id"]
+            for _ in range(args.jobs):
+                submit_next()
+            while active:
+                future = next(as_completed(active))
+                res = future.result()
+                del active[future]
+                f.write((json.dumps(res) + "\n").encode("utf-8"))
+                f.flush()
+                os.fsync(f.fileno())
+                counts[res["outcome"]] = counts.get(res["outcome"], 0) + 1
+                print(res["id"], res["outcome"], file=sys.stderr, flush=True)
+                submit_next()
+    print(f"{path}: appended {sum(counts.values())} items, skipped {len(recs)-len(pending)} finished: {counts}",
+          file=sys.stderr, flush=True)
+
+
 def run(args):
     versions = {"freecad": scripts.cli_version(args.freecad) or "FreeCAD unknown",
                 "dutchman": scripts.cli_version(args.dutchman) or "Dutchman unknown",
                 "solidcraft": scripts.cli_version(args.cli) or "SolidCraft unknown"}
-    recs = [json.loads(l) for l in Path(args.run).read_text().splitlines() if l.strip()]
-    path = Path(args.results or "fc-check.jsonl")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    done, counts = [], {}
-    with tempfile.TemporaryDirectory(prefix="fc-corpus-") as tmp, \
-            ThreadPoolExecutor(max_workers=args.jobs) as pool, path.open("w", encoding="utf-8") as f:
-        futures = [pool.submit(run_one, r, args, versions, tmp) for r in recs]
-        for future in as_completed(futures):
-            res = future.result()
-            done.append(res)
-            counts[res["outcome"]] = counts.get(res["outcome"], 0) + 1
-            f.write(json.dumps(res) + "\n")
-            f.flush()
-            print(res["id"], res["outcome"], file=sys.stderr)
-    path.write_text("".join(json.dumps(r) + "\n" for r in sorted(done,key=lambda r:r["id"])), encoding="utf-8")
-    print(f"checked {len(done)} items: {counts}", file=sys.stderr)
+    if args.all_batches:
+        corpus = list(scripts.items())
+        root = Path(args.work_dir).expanduser()
+        for batch in range(1, 101):
+            chosen = [it for it in corpus if 100*(batch-1) < int(it["id"][1:]) <= 100*batch]
+            run_batch(args, chosen, root / "results" / f"fc-batch-{batch:02d}.jsonl", versions)
+    else:
+        recs = [json.loads(l) for l in Path(args.run).read_text().splitlines() if l.strip()]
+        run_batch(args, recs, Path(args.results or "fc-check.jsonl").expanduser(), versions)
 
 
 def main(argv=None):
@@ -486,16 +615,21 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--batch", type=int, choices=range(1,101), metavar="N")
     mode.add_argument("--run", metavar="FILE")
+    mode.add_argument("--all-batches", action="store_true", help="generate pending IDs and resume batches 01–100")
     parser.add_argument("--freecad")
     parser.add_argument("--dutchman")
     parser.add_argument("--cli")
-    parser.add_argument("--jobs", type=int, default=3)
+    parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--results")
+    parser.add_argument("--work-dir", default="~/xpswork/fc-corpus")
+    parser.add_argument("--min-free-gb", type=float, default=20)
     args = parser.parse_args(argv)
-    if args.jobs < 1 or args.timeout <= 0:
-        parser.error("--jobs and --timeout must be positive")
-    if args.run:
+    if args.jobs < 1 or args.timeout <= 0 or args.min_free_gb < 0:
+        parser.error("--jobs and --timeout must be positive; --min-free-gb must be nonnegative")
+    if args.run or args.all_batches:
+        if args.all_batches and args.results:
+            parser.error("--all-batches writes per-batch results under --work-dir/results")
         if not all((args.freecad,args.dutchman,args.cli)):
             parser.error("--run needs --freecad, --dutchman and --cli")
         for key in ("freecad","dutchman","cli"):
