@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Keep the last issue data as a fallback
-        run: curl -fsS -o site/issues.json https://dutchman-cad.github.io/stress-corpus/issues.json || true
+        run: curl -fsS -o site/issues.json https://dutchmancad.xyz/stress-corpus/issues.json || true
       - name: Read issue and pull request states
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

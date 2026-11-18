@@ -1,6 +1,6 @@
 # Stress corpus
 
-Results at a glance: https://dutchman-cad.github.io/stress-corpus/ (every task as a pass, fail or not-started cell, with the fail rate per batch and per axis).
+Results at a glance: https://dutchmancad.xyz/stress-corpus/ (every task as a pass, fail or not-started cell, with the fail rate per batch and per axis).
 
 10,000 small modelling tasks, each one a plain sentence with real millimetre sizes. Build them in SolidCraft and/or Fusion, convert with Dutchman, compare the results, and record every failure in a results pull request. The goal is to find and fix bugs.
 
