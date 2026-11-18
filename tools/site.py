@@ -17,7 +17,7 @@ from common import FAILURES  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AXES = ["operation", "surface", "topology", "gap", "placement", "scale", "order"]
-OUTCOMES = ["correct", "correct-refusal", "wrong-result", "wrong-refusal", "hang", "crash", "skipped"]
+OUTCOMES = ["correct", "correct-refusal", "wrong-result", "wrong-refusal", "hang", "crash", "skipped", "source-failed"]
 BATCH = 100
 SNAPSHOT = "before-stress-test"
 SNAPSHOT_LABEL = "Before stress test (2026-11-17, SolidCraft 0.43.0)"
@@ -47,6 +47,7 @@ def build():
     builds = {}    # pipeline -> item index -> build of the newest re-run
     earlier = {}   # (pipeline, id) -> every first-run record
     reruns = []
+    latest = {}
     for path in sorted(glob.glob(os.path.join(ROOT, "results", "*.jsonl"))):
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -61,8 +62,10 @@ def build():
                 else:
                     earlier.setdefault((r.get("pipeline") or "solidcraft", r["id"]), []).append(r)
                     put(results, index, r)
+                    latest[(r.get("pipeline") or "solidcraft", r["id"])] = r
     for r in reruns:  # a re-check is newer than the result it re-checks
         put(results, index, r)
+        latest[(r.get("pipeline") or "solidcraft", r["id"])] = r
         builds.setdefault(r.get("pipeline") or "solidcraft", {})[str(index[r["id"]])] = (
             r.get("build") or r.get("version") or "")
     issues = load_issues()
@@ -77,6 +80,8 @@ def build():
         "results": results,
         "issues": issues,
         "fixed": fixed,
+        "causes": current_causes(latest.values(), issues),
+        "history": history_totals(latest.values()),
         "compare": compare(index, results, builds, issues),
         "repo": REPO,
     }
@@ -172,12 +177,43 @@ def cause_of(rec, known_urls):
     return key, "", display(rec.get("signature") or "") or rec["outcome"]
 
 
+def current_causes(records, issues):
+    """Current failures by pipeline and cause, including routes absent from the snapshot."""
+    known = {k: str(v).split() for k, v in load_known(os.path.join(ROOT, "known.json")).items()}
+    titles = {i["url"]: i["title"] for i in issues.get("issues", [])}
+    groups = {}
+    for r in records:
+        if r["outcome"] not in FAILURES:
+            continue
+        key, url, text = cause_of(r, known)
+        pipe = r.get("pipeline") or "solidcraft"
+        g = groups.setdefault((pipe, key), {"pipeline": pipe, "issue": url,
+                                            "cause": titles.get(url) or text or url, "items": []})
+        g["items"].append(r["id"])
+    for g in groups.values():
+        g["items"].sort()
+    return sorted(groups.values(), key=lambda g: (-len(g["items"]), g["cause"]))
+
+
+def history_totals(records):
+    totals = {}
+    for r in records:
+        h = r.get("history")
+        if not h:
+            continue
+        t = totals.setdefault(r["pipeline"], {"mapped": 0, "total": 0})
+        for k in t:
+            t[k] += h[k]
+    return totals
+
+
 def fixed_since(reruns, earlier, issues):
     """Items that failed on an earlier build and pass on the build a re-run used."""
     known_urls = {k: str(v).split() for k, v in load_known(os.path.join(ROOT, "known.json")).items()}
     titles = {i["url"]: "%s#%d %s" % (i["repo"].split("/")[1], i["number"], i["title"])
               for i in issues.get("issues", [])}
     groups, checked, still = {}, 0, 0
+    per_pipeline = {}
     for r in reruns:
         pipe = r.get("pipeline") or "solidcraft"
         olds = [o for o in earlier.get((pipe, r["id"]), []) if o.get("outcome") in FAILURES]
@@ -187,6 +223,7 @@ def fixed_since(reruns, earlier, issues):
         if old is None:
             continue
         checked += 1
+        per_pipeline[pipe] = per_pipeline.get(pipe, 0) + 1
         if r["outcome"] not in ("correct", "correct-refusal"):
             still += 1
             continue
@@ -199,7 +236,7 @@ def fixed_since(reruns, earlier, issues):
     out = sorted(groups.values(), key=lambda g: (-len(g["items"]), g["cause"]))
     for g in out:
         g["items"].sort()
-    return {"checked": checked, "still": still, "groups": out}
+    return {"checked": checked, "still": still, "groups": out, "per_pipeline": per_pipeline}
 
 
 def main():
@@ -213,7 +250,7 @@ def main():
     page = PAGE.replace("/*DATA*/null", safe).replace("@@UPDATED@@", data["updated"]).replace("@@REPO@@", REPO)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
         f.write(page)
-    done = sum(1 for p in data["results"].values() for v in p.values() if v[0] != 6)
+    done = sum(1 for p in data["results"].values() for v in p.values() if v[0] not in (6, 7))
     print(f"wrote site/index.html ({len(page)} bytes), {done} results with an outcome")
     return 0
 
@@ -226,9 +263,9 @@ PAGE = r"""<!doctype html>
 <title>Stress corpus results</title>
 <meta name="description" content="Pass and fail results for the 10,000 modelling tasks in the stress corpus.">
 <style>
-:root{--bg:#fafafa;--fg:#1d1f23;--mut:#5d6470;--card:#fff;--line:#d9dce1;--pass:#2e9e5b;--fail:#d6453d;--hang:#e5a50a;--none:#c9cdd3;--skip:#8a919c}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#14161a;--fg:#e6e8ec;--mut:#9aa2ae;--card:#1c1f25;--line:#363b45;--pass:#3cb878;--fail:#ef5f56;--hang:#f0b429;--none:#3a3f49;--skip:#7d8591}}
-:root[data-theme=dark]{--bg:#14161a;--fg:#e6e8ec;--mut:#9aa2ae;--card:#1c1f25;--line:#363b45;--pass:#3cb878;--fail:#ef5f56;--hang:#f0b429;--none:#3a3f49;--skip:#7d8591}
+:root{--bg:#fafafa;--fg:#1d1f23;--mut:#5d6470;--card:#fff;--line:#d9dce1;--pass:#2e9e5b;--fail:#d6453d;--hang:#e5a50a;--none:#c9cdd3;--source:#9474b5;--skip:#8a919c}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#14161a;--fg:#e6e8ec;--mut:#9aa2ae;--card:#1c1f25;--line:#363b45;--pass:#3cb878;--fail:#ef5f56;--hang:#f0b429;--none:#3a3f49;--source:#b293d2;--skip:#7d8591}}
+:root[data-theme=dark]{--bg:#14161a;--fg:#e6e8ec;--mut:#9aa2ae;--card:#1c1f25;--line:#363b45;--pass:#3cb878;--fail:#ef5f56;--hang:#f0b429;--none:#3a3f49;--source:#b293d2;--skip:#7d8591}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px}
@@ -312,6 +349,9 @@ svg text{fill:var(--mut);font-size:10px}
 <p class="mut" id="swipe" style="font-size:13px;margin:4px 0 0">Swipe sideways on a narrow screen.</p>
 <div class="card scroll" style="margin-top:8px"><table id="istable"></table></div>
 
+<h2>Current failures by cause</h2>
+<div class="card scroll"><table id="causes"></table></div>
+
 <h2>Before stress test vs now</h2>
 <div id="cmp"><p class="mut">No before-stress-test results to compare with.</p></div>
 
@@ -335,7 +375,7 @@ var OUT=D.outcomes, B=D.batch, N=D.items.length, AX=D.axes;
 var FAILS={2:1,3:1,4:1,5:1}; // wrong-result, wrong-refusal, hang, crash
 var PASS={0:1,1:1};
 var HANG={4:1,5:1};
-var NAMES=["Correct","Correct refusal","Wrong result","Wrong refusal","Hang","Crash","Skipped"];
+var NAMES=["Correct","Correct refusal","Wrong result","Wrong refusal","Hang","Crash","Skipped","Source failed"];
 var pipes=Object.keys(D.results); if(!pipes.length)pipes=["solidcraft"];
 pipes.sort(function(a,b){return a==="solidcraft"?-1:b==="solidcraft"?1:a<b?-1:1});
 var cur=pipes[0];
@@ -344,9 +384,9 @@ function css(n){return getComputedStyle(document.documentElement).getPropertyVal
 function pct(a,b){return b?(100*a/b).toFixed(1)+"%":"-"}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function res(n){return (D.results[cur]||{})[n]}
-function isDone(r){return r&&r[0]!==6}
+function isDone(r){return r&&r[0]!==6&&r[0]!==7}
 
-function label(p){return p==="solidcraft"?"SolidCraft":p==="fusion-dutchman"?"Fusion via Dutchman":p}
+function label(p){return p==="solidcraft"?"SolidCraft":p==="fusion-dutchman"?"Fusion via Dutchman":p==="freecad-dutchman"?"FreeCAD via Dutchman":p}
 function buildPipes(){
   var el=$("pipes"); el.innerHTML="";
   if(pipes.length<2){el.style.display="none";return}
@@ -354,12 +394,12 @@ function buildPipes(){
     b.setAttribute("aria-pressed",p===cur);b.onclick=function(){cur=p;buildPipes();all()};el.appendChild(b)});
 }
 function legend(){
-  $("legend").innerHTML=[["pass","Pass"],["fail","Fail"],["hang","Hang or crash"],["skip","Skipped"],["none","Not started"]].map(function(x){
+  $("legend").innerHTML=[["pass","Pass"],["fail","Fail"],["hang","Hang or crash"],["skip","Skipped"],["source","Source failed"],["none","Not started"]].map(function(x){
     return '<span><i class="sw '+x[0]+'" style="'+(x[0]==="skip"?"":"background:var(--"+x[0]+")")+'"></i>'+x[1]+"</span>"}).join("");
 }
 function colour(r){
   if(!r)return["fill","none"];
-  var o=r[0]; if(o===6)return["skip","skip"];
+  var o=r[0]; if(o===6)return["skip","skip"]; if(o===7)return["fill","source"];
   if(PASS[o])return["fill","pass"]; if(HANG[o])return["fill","hang"]; return["fill","fail"];
 }
 var geo={};
@@ -368,7 +408,7 @@ function drawGrid(){
   var dpr=window.devicePixelRatio||1;
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);cv.style.height=H+"px";
   var g=cv.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
-  var col={pass:css("--pass"),fail:css("--fail"),hang:css("--hang"),none:css("--none"),skip:css("--skip"),mut:css("--mut")};
+  var col={pass:css("--pass"),fail:css("--fail"),hang:css("--hang"),none:css("--none"),skip:css("--skip"),source:css("--source"),mut:css("--mut")};
   geo={lab:lab,cw:cw,ch:ch};
   var gap=cw>=5?1:0;
   for(var n=0;n<N;n++){
@@ -404,22 +444,30 @@ function wire(){
     $("detail").innerHTML=d.h+(d.link?'<br><a href="'+esc(d.link)+'">Issue</a>':"")});
 }
 function counts(){
-  var c=[0,0,0,0,0,0,0];
+  var c=OUT.map(function(){return 0});
   for(var k in (D.results[cur]||{}))c[D.results[cur][k][0]]++;
   return c;
 }
 function totals(){
   var c=counts(),done=0,fails=0;
   for(var i=0;i<6;i++){done+=c[i];if(FAILS[i])fails+=c[i]}
-  var tried=done+c[6];
+  var tried=done+c[6]+c[7];
   var cards=[["Done",done+" of "+N.toLocaleString()],["Fail rate",pct(fails,done)+" ("+fails+" of "+done+")"]];
-  for(var i=0;i<7;i++)cards.push([NAMES[i],String(c[i])]);
+  for(var i=0;i<OUT.length;i++)cards.push([NAMES[i],String(c[i])]);
+  var hist=(D.history||{})[cur]; if(hist)cards.push(["History mapped",hist.mapped.toLocaleString()+" of "+hist.total.toLocaleString()]);
   cards.push(["Not started",String(N-tried)]);
   $("totals").innerHTML=cards.map(function(x){return"<div><span class=mut>"+x[0]+"</span><b>"+esc(x[1])+"</b></div>"}).join("");
-  $("totnote").textContent="Done means built or refused, with an outcome other than skipped. Skipped tasks are left out of every rate.";
+  $("totnote").textContent="Done means a downstream outcome. Skipped tasks and FreeCAD source failures are left out of every failure rate.";
+}
+function pipelineIssues(){
+  var urls={};
+  (D.causes||[]).forEach(function(g){if(g.pipeline===cur&&g.issue)urls[g.issue]=1});
+  (D.fixed.groups||[]).forEach(function(g){if(g.pipeline===cur&&g.issue)urls[g.issue]=1});
+  if(D.compare)(D.compare.causes||[]).forEach(function(g){if(g.pipeline===cur&&g.issue)urls[g.issue]=1});
+  return ((D.issues&&D.issues.issues)||[]).filter(function(i){return urls[i.url]});
 }
 function flows(){
-  var L=(D.issues&&D.issues.issues)||[],R=D.results[cur]||{},f={run:0,pass:0,fail:0,skip:0,cov:0,unf:0,ni:0,pr:0,nopr:0,merged:0,open:0,closed:0};
+  var L=pipelineIssues(),R=D.results[cur]||{},f={run:0,pass:0,fail:0,skip:0,cov:0,unf:0,ni:0,pr:0,nopr:0,merged:0,open:0,closed:0};
   var by={},hit={};
   L.forEach(function(i){
     var st="";
@@ -428,7 +476,7 @@ function flows(){
     (i.items||[]).forEach(function(id){(by[id]=by[id]||[]).push(i)});
   });
   for(var k in R){var r=R[k][0],id=D.items[+k][0];f.run++;
-    if(r===6)f.skip++;else if(PASS[r])f.pass++;
+    if(r===6||r===7)f.skip++;else if(PASS[r])f.pass++;
     else{f.fail++;if(by[id]){f.cov++;by[id].forEach(function(i){hit[i.url]=i})}else f.unf++}}
   Object.keys(hit).forEach(function(u){var i=hit[u];f.ni++;if(i.prstate){f.pr++;f[i.prstate]++}else f.nopr++});
   return f;
@@ -456,7 +504,7 @@ function sankey(){
   var y=top;
   y+=band("pass",cx[1],y,f.pass,s1,"Passed",css("--pass"),n(f.pass))+pad;
   var yf=y;y+=band("fail",cx[1],y,f.fail,s1,"Failed",css("--fail"),n(f.fail))+pad;
-  band("skip",cx[1],y,f.skip,s1,"Skipped",css("--skip"),n(f.skip));
+  band("skip",cx[1],y,f.skip,s1,"Skipped / source failed",css("--skip"),n(f.skip));
   link("run","pass",f.pass,css("--pass"),s1,"Run to passed");link("run","fail",f.fail,css("--fail"),s1,"Run to failed");link("run","skip",f.skip,css("--skip"),s1,"Run to skipped");
   // stage 3: covered / not yet filed, aligned with the failed band
   y=yf;
@@ -483,11 +531,11 @@ function sankey(){
   link("pr","merged",f.merged,css("--pass"),s2,"To merged");link("pr","open",f.open,css("--hang"),s2,"To open");link("pr","closed",f.closed,css("--fail"),s2,"To closed unmerged");
   svg.setAttribute("viewBox","0 0 "+W+" "+H);
   svg.innerHTML=out.join("");
-  $("isnote").textContent=n(f.run)+" items run: "+n(f.pass)+" passed, "+n(f.fail)+" failed, "+n(f.skip)+" skipped. "+n(f.cov)+" of the failed items are covered by "+f.ni+" issues and "+n(f.unf)+" are not yet filed. Left of the dashed line the bands count items; right of it they count issues. "+f.pr+" issues have a fix pull request: "+f.merged+" merged, "+f.open+" open, "+f.closed+" closed without merging. A fix pull request is one that says it fixes the issue or is cross-referenced from it. "+(D.issues.updated?"Checked "+D.issues.updated+".":"");
+  $("isnote").textContent=n(f.run)+" items run: "+n(f.pass)+" passed, "+n(f.fail)+" failed, "+n(f.skip)+" skipped or source failed. "+n(f.cov)+" of the failed items are covered by "+f.ni+" issues and "+n(f.unf)+" are not yet filed. Left of the dashed line the bands count items; right of it they count issues. "+f.pr+" issues have a fix pull request: "+f.merged+" merged, "+f.open+" open, "+f.closed+" closed without merging. A fix pull request is one that says it fixes the issue or is cross-referenced from it. "+(D.issues.updated?"Checked "+D.issues.updated+".":"");
 }
 function issueTable(){
   // Biggest first: issues covering the most items at the top (contributor's ask, 2026-11-17).
-  var L=((D.issues&&D.issues.issues)||[]).slice().sort(function(a,b){return b.items.length-a.items.length||a.number-b.number});
+  var L=pipelineIssues().slice().sort(function(a,b){return b.items.length-a.items.length||a.number-b.number});
   if(!L.length){$("istable").innerHTML="<tr><td>No issues yet.</td></tr>";return}
   var h='<tr><th class="l">Issue</th><th class="l">Title</th><th>Items</th><th class="l">PR</th><th>State</th></tr>';
   L.forEach(function(i){
@@ -496,7 +544,8 @@ function issueTable(){
   $("istable").innerHTML=h;
 }
 function fixedSince(){
-  var F=D.fixed||{checked:0,groups:[]};
+  var base=D.fixed||{checked:0,groups:[]};
+  var F={checked:(base.per_pipeline||{})[cur]||0,groups:base.groups.filter(function(g){return g.pipeline===cur})};
   if(!F.checked){$("fxnote").textContent="No re-runs yet. When a failed item is checked again on a newer build and passes, it shows up here, grouped by cause.";$("fixed").innerHTML="";return}
   var n=0;F.groups.forEach(function(g){n+=g.items.length});
   $("fxnote").textContent=n+" of "+F.checked+" re-checked items that failed before now pass.";
@@ -510,7 +559,7 @@ function shade(rate){var a=Math.min(1,.12+rate*.88);return"color-mix(in srgb, "+
 function tally(){
   var T={};AX.forEach(function(a,i){T[a]=D.values[a].map(function(){return[0,0]})});
   var heat={};
-  for(var k in (D.results[cur]||{})){var r=D.results[cur][k];if(r[0]===6)continue;var it=D.items[+k];
+  for(var k in (D.results[cur]||{})){var r=D.results[cur][k];if(!isDone(r))continue;var it=D.items[+k];
     var f=FAILS[r[0]]?1:0;
     AX.forEach(function(a,i){var c=T[a][it[i+1]];c[0]++;c[1]+=f});
     var key=it[1]+"|"+it[3],h=heat[key]||(heat[key]=[0,0]);h[0]++;h[1]+=f}
@@ -536,7 +585,7 @@ function cmpDraw(cv,wrap,get,mark){
   var W=wrap.clientWidth,lab=W<300?18:24,cw=(W-lab)/B,ch=Math.max(cw,2),H=Math.ceil(ch*B),dpr=window.devicePixelRatio||1;
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);cv.style.height=H+"px";
   var g=cv.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
-  var col={pass:css("--pass"),fail:css("--fail"),hang:css("--hang"),none:css("--none"),skip:css("--skip"),mut:css("--mut"),fg:css("--fg"),card:css("--card")};
+  var col={pass:css("--pass"),fail:css("--fail"),hang:css("--hang"),none:css("--none"),skip:css("--skip"),source:css("--source"),mut:css("--mut"),fg:css("--fg"),card:css("--card")};
   var gap=cw>=5?1:0,g2={lab:lab,cw:cw,ch:ch};
   for(var n=0;n<N;n++){
     var x=lab+(n%B)*cw,y=Math.floor(n/B)*ch,c=colour(get(n));
@@ -557,6 +606,7 @@ function cmpCell(cv,geo,ev){var rc=cv.getBoundingClientRect(),x=ev.clientX-rc.le
 function compare(){
   var C=D.compare,box=$("cmp");
   if(!C){box.innerHTML='<p class="mut">No before-stress-test results to compare with.</p>';return}
+  if(!C.then||!C.then[cur]){box.innerHTML='<p class="mut">No before-stress-test results for this pipeline.</p>';return}
   var T=(C.then&&C.then[cur])||{},R=D.results[cur]||{},BL=(C.builds&&C.builds[cur])||{};
   var st={fixed:0,reg:0,still:0,rerun:0,notyet:0,thenFail:0,fixedIds:[],regIds:[]};
   var chg={};
@@ -597,7 +647,14 @@ function compare(){
       tip.style.display="block";var x=e.clientX+14,y=e.clientY+14;if(x+330>innerWidth)x=Math.max(4,e.clientX-334);if(y+100>innerHeight)y=e.clientY-90;tip.style.left=x+"px";tip.style.top=y+"px"});
     p[0].addEventListener("mouseleave",function(){tip.style.display="none"})});
 }
-function all(){drawGrid();totals();tables();sankey();issueTable();compare();fixedSince()}
+function causeTable(){
+  var groups=(D.causes||[]).filter(function(g){return g.pipeline===cur});
+  var h='<tr><th class="l">Cause</th><th>Failed items</th><th class="l">Items</th></tr>';
+  groups.forEach(function(g){var c=g.issue?'<a href="'+esc(g.issue)+'">'+esc(g.cause)+'</a>':esc(g.cause);
+    h+='<tr><td style="text-align:left;white-space:normal;min-width:220px">'+c+'</td><td>'+g.items.length+'</td><td style="text-align:left;white-space:normal">'+esc(g.items.join(" "))+'</td></tr>'});
+  $("causes").innerHTML=groups.length?h:'<tr><td>No current failures for this pipeline.</td></tr>';
+}
+function all(){causeTable();drawGrid();totals();tables();sankey();issueTable();compare();fixedSince()}
 legend();buildPipes();wire();all();
 var rt;addEventListener("resize",function(){clearTimeout(rt);rt=setTimeout(function(){drawGrid();compare()},100)});
 if(matchMedia)matchMedia("(prefers-color-scheme:dark)").addEventListener("change",all);

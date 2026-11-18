@@ -141,14 +141,17 @@ For an extracted Linux AppImage, use a launcher that sets `PYTHONHOME` to
 `FREECAD_CMD` to this launcher when running
 `python3 -m unittest discover -s tests` to include real headless API smoke tests.
 
-Validated on Linux with FreeCAD 1.1.4, Dutchman 0.2.10, and solidcraft-cli
-0.44.1. Batch 01 with four workers and partial-history selection: 38 correct,
-1 wrong-result, 1 wrong-refusal, 20 source-failed, and 40 skipped; the result
-validator accepts all 100 lines. S0087 loses one of two bodies and remains a
-wrong result. S0008's final imported geometry has the expected body count and
-matches the source volume; its earlier large measurement included the prefix.
-The external run report is not committed. All 10,000 generator records were
-classified, and every supported macro passed Python compilation.
+The full run on xps-aurora uses FreeCAD 1.1.4, Dutchman 0.2.10, and
+solidcraft-cli 0.44.1. The 100 committed `results/fc-batch-NN.jsonl` files
+cover all 10,000 items: 3,531 correct, 22 correct-refusal, 1,629 source-failed,
+4,787 skipped, 20 wrong-refusal, 9 wrong-result, and 2 hang. History mapping
+retained 31,853 of 37,576 features (5,723 unmapped). The results page shows
+FreeCAD via Dutchman separately, including its source failures, history totals,
+and current failures by cause. Skipped items and source failures are excluded
+from downstream failure rates. A correct result checks volume where the corpus
+specifies it, otherwise body count only; it is not a full geometry comparison.
+All 10,000 generator records were classified, and every supported macro passed
+Python compilation.
 
 #### Resumable Linux host run
 
