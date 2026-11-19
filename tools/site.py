@@ -70,6 +70,7 @@ def build():
             r.get("build") or r.get("version") or "")
     issues = load_issues()
     fixed = fixed_since(reruns, earlier, issues)
+    comparison = compare(index, results, builds, issues)
     return {
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "batch": BATCH,
@@ -82,7 +83,8 @@ def build():
         "fixed": fixed,
         "causes": current_causes(latest.values(), issues),
         "history": history_totals(latest.values()),
-        "compare": compare(index, results, builds, issues),
+        "compare": comparison,
+        "progress": progress_totals(comparison, results),
         "repo": REPO,
     }
 
@@ -150,6 +152,39 @@ def compare(index, results, builds, issues):
         c["builds"] = sorted(c["builds"])
     return {"label": SNAPSHOT_LABEL, "then": then, "builds": builds,
             "newest": newest_build(builds), "causes": out}
+
+
+def progress_totals(comparison, results):
+    """Snapshot failures now passing, and regressions, shared by every progress display."""
+    out = {}
+    if not comparison:
+        return out
+    for pipe, then in comparison['then'].items():
+        now = results.get(pipe, {})
+        builds = comparison['builds'].get(pipe, {})
+        st = dict(fixed=0, reg=0, still=0, rerun=0, notyet=0, thenFail=0,
+                  fixedIds=[], regIds=[], changes={})
+        for n, old in then.items():
+            a, b = old[0], now.get(n, [6])[0]
+            rerun = bool(builds.get(n))
+            st['rerun'] += rerun
+            if a in (2, 3, 4, 5):
+                st['thenFail'] += 1
+                st['notyet'] += not rerun
+                if b in (0, 1):
+                    st['fixed'] += 1
+                    st['fixedIds'].append(int(n))
+                    st['changes'][n] = 'fix'
+                else:
+                    st['still'] += 1
+            elif a in (0, 1) and b in (2, 3, 4, 5):
+                st['reg'] += 1
+                st['regIds'].append(int(n))
+                st['changes'][n] = 'reg'
+            elif a != b and rerun:
+                st['changes'][n] = 'chg'
+        out[pipe] = st
+    return out
 
 
 def put(results, index, r):
@@ -239,6 +274,127 @@ def fixed_since(reruns, earlier, issues):
     return {"checked": checked, "still": still, "groups": out, "per_pipeline": per_pipeline}
 
 
+def static_content(data):
+    """Readable, complete result sections for browsers without JavaScript."""
+    from html import escape
+    e = lambda value: escape(str(value), quote=True)
+    names = ["Correct", "Correct refusal", "Wrong result", "Wrong refusal", "Hang", "Crash", "Skipped", "Source failed"]
+
+    def table(heads, rows):
+        if len(rows) > 10:
+            return table(heads, rows[:10]) + '<details><summary class="table-toggle">Show all %d rows</summary>%s</details>' % (len(rows), table_full(heads, rows[10:]))
+        return table_full(heads, rows)
+
+    def table_full(heads, rows):
+        return '<div class="card scroll"><table><thead><tr>' + ''.join(
+            '<th scope="col">' + e(h) + '</th>' for h in heads
+        ) + '</tr></thead><tbody>' + ''.join(
+            '<tr>' + ''.join('<td style="white-space:normal">' + str(c) + '</td>' for c in row) + '</tr>'
+            for row in rows
+        ) + '</tbody></table></div>'
+
+    def item_list(items):
+        return '<details class="item-list"><summary>%d item IDs</summary><p>%s</p></details>' % (len(items), e(' '.join(items)))
+
+    def cause(g):
+        return '<a href="' + e(g['issue']) + '">' + e(g['cause']) + '</a>' if g['issue'] else e(g['cause'])
+
+    def counts(pipe, source=None):
+        out = [0] * len(OUTCOMES)
+        for r in (source if source is not None else data['results']).get(pipe, {}).values():
+            out[r[0]] += 1
+        return out
+
+    def grid(results):
+        colors = ['pass', 'pass', 'fail', 'fail', 'hang', 'hang', 'skip', 'source']
+        paths = {}
+        for n in range(len(data['items'])):
+            r = results.get(str(n))
+            col = colors[r[0]] if r else 'none'
+            paths.setdefault(col, []).append('M%d %dh1v1h-1z' % (n % BATCH, n // BATCH))
+        cells = ''.join('<path fill="var(--%s)" d="%s"/>' % (col, ''.join(parts)) for col, parts in paths.items())
+        return '<svg class="fallback-grid" role="img" aria-label="All tasks in ID order; outcome counts in the route comparison table" viewBox="0 0 %d %d">%s</svg>' % (
+            BATCH, max(1, (len(data['items']) + BATCH - 1) // BATCH), cells)
+
+    c = counts('solidcraft')
+    fixed = data['progress'].get('solidcraft', {}).get('fixed', 0)
+    stats = [('Items', len(data['items']), 'In the corpus'), ('Correct', c[0] + c[1], 'Including correct refusals'),
+             ('Wrong', c[2] + c[3], 'wrong results + wrong refusals'), ('Hangs', c[4], 'Time limit exceeded'),
+             ('Issues filed', len(data['issues']['issues']), 'Across the corpus'), ('Fixed', fixed, 'Failed before stress test; now passing')]
+    content = {'stats': ''.join('<div class="stat"><b>' + format(n, ',') + '</b><span>' + label + '</span><small>' + note + '</small></div>' for label, n, note in stats)}
+    regressions = data['progress'].get('solidcraft', {}).get('reg', 0)
+    content['regressions'] = '<span id="progress-badge" class="regression-badge" aria-label="%d regressions"%s>%d</span>' % (regressions, '' if regressions else ' hidden', regressions)
+    fallback = {key: '' for key in ('solidcraft-vs-freecad', 'the-grid', 'where-the-fails-are',
+                                  'current-failures-by-cause', 'one-axis-at-a-time', 'fixed-since',
+                                  'before-stress-test-vs-now', 'issues-from-the-corpus')}
+    fallback['progress-banner'] = '<div class="regression-banner%s">%d regressions: passed before the stress test, fails now.</div>' % (' bad' if regressions else '', regressions) if data['compare'] else ''
+    if not data['compare']:
+        fallback['before-stress-test-vs-now'] = '<p>No before-stress-test results to compare with.</p>'
+    routes = [('solidcraft', 'SolidCraft'), ('freecad-dutchman', 'FreeCAD via Dutchman')]
+    cs = [counts(pipe) for pipe, _ in routes]
+    rows = [('Items built (downstream outcome)', *[sum(c[:6]) for c in cs])]
+    rows += [(name, *[c[n] for c in cs]) for n, name in enumerate(names)]
+    rows += [('History features kept / total', *[
+        str(data['history'][p]['mapped']) + ' / ' + str(data['history'][p]['total']) if p in data['history'] else 'Not recorded'
+        for p, _ in routes])]
+    fallback['solidcraft-vs-freecad'] = table(['Outcome', 'SolidCraft', 'FreeCAD via Dutchman'], rows)
+    for pipe, label in routes:
+        if pipe not in data['results']:
+            continue
+        heading = '<h3>' + label + '</h3>'
+        results = data['results'][pipe]
+        rate = lambda a, b: ('%.1f%%' % (100 * a / b)) if b else '-'
+        fallback['the-grid'] += heading + '<p>Each row is one batch of 100. Red is a bug found; grey is not tried yet. Green: pass; yellow: hang or crash; purple: source failed.</p>' + grid(results)
+        groups = [g for g in data['causes'] if g['pipeline'] == pipe]
+        fallback['current-failures-by-cause'] += heading + table(['Cause', 'Failed items', 'Items'], [
+            (cause(g), len(g['items']), item_list(g['items'])) for g in groups])
+        groups = [g for g in data['fixed']['groups'] if g['pipeline'] == pipe]
+        checked = data['fixed']['per_pipeline'].get(pipe, 0)
+        fallback['fixed-since'] += heading + '<p>%d of %d re-checked items that failed before now pass.</p>' % (sum(len(g['items']) for g in groups), checked) + table(
+            ['Cause', 'Before', 'Now', 'Fixed', 'Items'], [(cause(g), e(g['from']), e(g['to']), len(g['items']), item_list(g['items'])) for g in groups])
+        tallies = {a: [[0, 0] for _ in data['values'][a]] for a in AXES}
+        heat = {}
+        for n, r in results.items():
+            if r[0] in (6, 7):
+                continue
+            item = data['items'][int(n)]
+            fail = int(r[0] in (2, 3, 4, 5))
+            for i, axis in enumerate(AXES):
+                t = tallies[axis][item[i + 1]]
+                t[0] += 1
+                t[1] += fail
+            t = heat.setdefault((item[1], item[3]), [0, 0])
+            t[0] += 1
+            t[1] += fail
+        fallback['where-the-fails-are'] += heading + table(['Operation'] + data['values']['topology'], [
+            [e(op)] + ['%d/%d' % (heat[(i, j)][1], heat[(i, j)][0]) if (i, j) in heat else '–'
+                       for j in range(len(data['values']['topology']))] for i, op in enumerate(data['values']['operation'])])
+        fallback['one-axis-at-a-time'] += heading + table(['Axis', 'Value', 'Fail rate', 'Done'], [
+            (axis, e(value), rate(tallies[axis][i][1], tallies[axis][i][0]), tallies[axis][i][0])
+            for axis in ['surface', 'gap', 'placement', 'scale', 'order'] for i, value in enumerate(data['values'][axis])])
+        comp = data['compare']
+        if comp and pipe in comp['then']:
+            then = comp['then'][pipe]
+            builds = comp['builds'].get(pipe, {})
+            st = data['progress'][pipe]
+            fixed = st['fixed']
+            regressions = [str(n) for n in st['regIds']]
+            fallback['before-stress-test-vs-now'] += heading + '<p>%d items re-run. %d failing items now pass. %d regressions.</p>' % (st['rerun'], fixed, st['reg'])
+            fallback['before-stress-test-vs-now'] += '<h4>' + e(comp['label']) + '</h4>' + grid(then) + '<h4>Now</h4>' + grid(results)
+            fallback['before-stress-test-vs-now'] += table(['Cause', 'Failing then', 'Now passing', 'Fixed by build'], [
+                (cause(g), g['then'], g['now'], e(', '.join(g['builds']))) for g in comp['causes'] if g['pipeline'] == pipe])
+            if regressions:
+                fallback['before-stress-test-vs-now'] += table(['Regression', 'Then', 'Now', 'Build'], [
+                    (data['items'][int(n)][0], names[then[n][0]], names[results[n][0]], e(builds.get(n, ''))) for n in regressions])
+    fallback['issues-from-the-corpus'] = '<p>Issues and linked fix pull requests. Checked ' + e(data['issues']['updated']) + '.</p>' + table(
+        ['Issue', 'Title', 'Items', 'Fix pull requests', 'State'], [
+            ('<a href="' + e(i['url']) + '">' + e(i['repo']) + ' #' + str(i['number']) + '</a>', e(i['title']), len(i['items']),
+             ', '.join('<a href="' + e(pr['url']) + '">#' + str(pr['number']) + '</a> ' + e(pr['state']) for pr in i['prs']) or 'none', e(i['state']))
+            for i in sorted(data['issues']['issues'], key=lambda i: (-len(i['items']), i['number']))])
+    content.update({key: '<noscript>' + value + '</noscript>' for key, value in fallback.items()})
+    return content
+
+
 def main():
     data = build()
     out = os.path.join(ROOT, "site")
@@ -248,6 +404,9 @@ def main():
         f.write(blob)
     safe = blob.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     page = PAGE.replace("/*DATA*/null", safe).replace("@@UPDATED@@", data["updated"]).replace("@@REPO@@", REPO)
+    content = static_content(data)
+    page = page.replace("@@STATS@@", content.pop("stats")).replace("@@REGRESSIONS@@", content.pop("regressions"))
+    page = re.sub(r"@@FALLBACK:([\w-]+)@@", lambda m: content.get(m[1], ""), page)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
         f.write(page)
     done = sum(1 for p in data["results"].values() for v in p.values() if v[0] not in (6, 7))
@@ -258,6 +417,7 @@ def main():
 PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
+<noscript><style>#cmp,#sankey,#swipe,#gridwrap,#detail,#pipes,#tip,.card:has(>table:empty),.card:has(>#sankey),.card:has(>#gridwrap){display:none}</style></noscript>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stress corpus results</title>
@@ -302,8 +462,8 @@ td.e{color:var(--mut)}
 @media (max-width:700px){.cmpcols{grid-template-columns:1fr}}
 .cmpcols h3{font-size:1rem;margin:0 0 6px}
 .cmpcols canvas{cursor:default}
-#regban{border-radius:8px;padding:12px 14px;font-weight:600;font-size:1.05rem;margin:8px 0;border:2px solid var(--pass);background:var(--card)}
-#regban.bad{border-color:var(--fail);background:var(--fail);color:#fff}
+.regression-banner,#regban{border-radius:8px;padding:12px 14px;font-weight:600;font-size:1.05rem;margin:8px 0;border:2px solid var(--pass);background:var(--card)}
+.regression-banner.bad,#regban.bad{border-color:var(--fail);background:var(--fail);color:#fff}
 #regban small{display:block;font-weight:400;font-size:.9rem}
 .ol{display:inline-block;width:12px;height:12px;border:2px solid var(--fg);vertical-align:-2px;margin-right:4px}
 .ol.r{border-color:var(--fail)}
@@ -324,13 +484,148 @@ td.e{color:var(--mut)}
 .take li{margin:.25em 0}
 footer{margin:2em 0 1em;color:var(--mut);font-size:.9rem}
 svg text{fill:var(--mut);font-size:10px}
+
+/* Navigation is an ordinary set of anchors until enhanced by JavaScript. */
+:root{--accent:#176b57;--tint:#eaf3ef}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--accent:#7bd6b5;--tint:#20382f}}
+:root[data-theme=dark]{--accent:#7bd6b5;--tint:#20382f}
+main{max-width:1320px;padding:0 40px;margin:auto}
+.masthead{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:36px 0 26px}
+.eyebrow{font-size:.7rem;font-weight:750;letter-spacing:.14em;color:var(--accent);margin:0 0 10px}
+h1{font-size:clamp(1.8rem,4vw,2.7rem);line-height:1.15;letter-spacing:-.04em;margin:0 0 10px}
+.updated{font-size:.75rem;color:var(--mut);margin-top:10px;font-variant-numeric:tabular-nums}
+.button,.table-toggle{display:inline-block;border:1px solid var(--line);border-radius:7px;padding:9px 14px;background:var(--card);color:var(--fg);font:inherit;cursor:pointer;text-decoration:none}
+.primary{background:var(--accent);color:var(--card);border-color:var(--accent);font-weight:650;white-space:nowrap}
+.tabbar{position:sticky;top:0;z-index:4;display:flex;gap:5px;overflow-x:auto;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 0;scrollbar-width:thin}
+.tabbar a{flex:none;padding:9px 18px;border-radius:6px;text-decoration:none;color:var(--mut);font-size:.9rem;font-weight:650}
+.regression-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.25em;padding:0 5px;margin-left:4px;border-radius:99px;background:var(--fail);color:#fff;font-size:.7rem;line-height:1.6}.regression-badge[hidden]{display:none}
+.tabbar a:hover{background:var(--tint);color:var(--accent)}
+.tabbar [aria-selected=true]{background:var(--fg);color:var(--bg)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+.route-context{font-size:.8rem;margin:14px 0 0}.workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:40px;align-items:start}
+.panels,.panel,.card,.cols>*{min-width:0}
+.panel{padding:8px 0 32px;scroll-margin-top:82px}
+.panel[hidden]{display:none}
+.subsection,#solidcraft-vs-freecad{scroll-margin-top:90px;margin:24px 0 36px}
+h2{font-size:1.25rem;letter-spacing:-.02em;margin:0 0 12px}
+h2 a{text-decoration:none}h2 a:hover{text-decoration:underline}
+.card{border-radius:10px;padding:16px}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}
+.stat{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.stat b{display:block;font-size:2.2rem;line-height:1.25;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.stat span{display:block;font-size:.8rem;color:var(--mut);margin-top:6px}
+.stat small{display:block;font-size:.7rem;color:var(--mut)}
+.stat:first-child{background:var(--tint);border-color:var(--accent)}
+.tot{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}
+.tot b{font-size:1.15rem}.tot span{font-size:.8rem}
+#outline{display:none}
+@media(min-width:1100px){.enhanced .workspace{grid-template-columns:minmax(0,1fr) 180px}.enhanced #outline{display:block;position:sticky;top:96px;padding-left:18px;border-left:1px solid var(--line);margin-top:32px;font-size:.8rem}#outline p{font-size:.65rem;letter-spacing:.12em;font-weight:750;color:var(--mut);text-transform:uppercase;margin:0 0 12px}#outline a{display:block;text-decoration:none;color:var(--mut);padding:7px 0}#outline a:hover,#outline a[aria-current]{color:var(--accent)}}
+.item-list summary{cursor:pointer;color:var(--accent);white-space:nowrap}.item-list p{max-width:28em;font-size:.75rem;line-height:1.7}
+.table-toggle{font-size:.8rem;margin-top:12px}
+tr[hidden]{display:none}
+.scroll{max-width:100%;overscroll-behavior-x:contain}
+table{width:100%}
+p,li,td{overflow-wrap:anywhere}
+#tip{max-width:min(320px,calc(100vw - 16px))}
+.fallback-grid{width:100%;height:auto;display:block}
+@media(max-width:600px){main{padding:0 16px}.masthead{align-items:flex-start;gap:12px;padding:24px 0 20px}.masthead .primary{padding:7px 10px;font-size:.8rem}.masthead .mut{font-size:.85rem}.eyebrow{font-size:.6rem}.tabbar{margin:0 -16px;padding:8px 16px;gap:2px}.tabbar a{padding:9px 13px}.workspace{gap:0}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:14px}.stat b{font-size:1.8rem}.card{padding:12px}.cols{grid-template-columns:minmax(0,1fr)}.hb{grid-template-columns:minmax(85px,110px) minmax(20px,1fr) auto;font-size:.75rem;gap:4px}.subsection{margin-top:20px}}
 </style>
 </head>
 <body>
 <main>
+<header class="masthead">
+<div><p class="eyebrow">DUTCHMAN CAD / STRESS CORPUS</p>
 <h1>Stress corpus results</h1>
-<p class="mut">10,000 small modelling tasks, one per cell, in ID order. Each row is one batch of 100. Red is a bug found; grey is not tried yet.</p>
+<p class="mut">10,000 modelling tasks testing SolidCraft and FreeCAD, one result at a time.</p>
+<p class="updated">Last updated <time>@@UPDATED@@</time></p></div>
+<a class="button primary" href="#take-part">Take part <span aria-hidden="true">↗</span></a>
+</header>
+<nav class="tabbar" aria-label="Results sections">
+<a id="tab-overview" href="#overview">Overview</a>
+<a id="tab-grid" href="#grid">Grid</a>
+<a id="tab-progress" href="#progress">Progress @@REGRESSIONS@@</a>
+<a id="tab-failures" href="#failures">Failures</a>
+<a id="tab-issues" href="#issues">Issues</a>
+<a id="tab-take-part" href="#take-part">Take part</a>
+</nav>
+<p class="mut route-context" id="route-context"></p>
+<div class="workspace"><div class="panels">
+<article id="overview" class="panel" aria-labelledby="tab-overview" data-label="Overview">
+<section id="headline-totals" class="subsection">
+<span id="outcome-totals"></span><span id="totals"></span>
+<h2>At a glance</h2><p class="mut" id="headline-route">SolidCraft · latest committed results</p><div class="stats" id="headline-stats">@@STATS@@</div>
+<p class="mut" id="totnote">Done means a downstream outcome. Skipped tasks and FreeCAD source failures are left out of every failure rate.</p>
+</section>
+<section id="solidcraft-vs-freecad" aria-labelledby="route-title">
+<h2 id="route-title"><a href="#solidcraft-vs-freecad">SolidCraft vs FreeCAD: all 10,000 items</a></h2>
+<p class="mut">The same tasks, two routes: built directly in SolidCraft, or built in FreeCAD and converted with Dutchman.</p>
+<div class="card"><table class="route-table" id="route-comparison" aria-labelledby="route-title"></table></div>
+@@FALLBACK:solidcraft-vs-freecad@@</section>
+</article>
+<article id="grid" class="panel" aria-labelledby="tab-grid" data-label="Grid">
+<section id="the-grid" class="subsection">
+<h2>The grid</h2>
+<p class="mut">One cell per task, in ID order. Each row is one batch of 100. Red is a bug found; grey is not tried yet.</p>
+<div class="bar"><span class="seg" id="pipes" role="group" aria-label="Grid route"></span></div>
+<p class="mut" id="gridroute" aria-live="polite"></p>
+<div class="bar"><span class="legend" id="legend"></span></div>
+<div class="card"><div id="gridwrap"><canvas id="result-grid" aria-label="Grid of all 10,000 tasks"></canvas></div>
+<div id="detail" class="mut">Hover or tap a cell for details.</div></div>
+<div id="tip"></div>
 
+@@FALLBACK:the-grid@@
+</section>
+<section id="where-the-fails-are" class="subsection">
+<h2>Where the fails are</h2>
+<p class="mut">Fail rate by operation and topology: fails out of done. A dash means nothing has been run there yet. Only tasks with a result count.</p>
+<div class="card scroll"><table id="heat"></table></div>
+
+@@FALLBACK:where-the-fails-are@@
+</section>
+</article>
+<article id="progress" class="panel" aria-labelledby="tab-progress" data-label="Progress">
+<section id="before-stress-test-vs-now" class="subsection">
+<div id="progress-banner">@@FALLBACK:progress-banner@@</div>
+<h2>Before stress test vs now</h2>
+<div id="cmp"><p class="mut">No before-stress-test results to compare with.</p></div>
+
+@@FALLBACK:before-stress-test-vs-now@@
+</section>
+</article>
+<article id="failures" class="panel" aria-labelledby="tab-failures" data-label="Failures">
+<section id="current-failures-by-cause" class="subsection">
+<h2>Current failures by cause</h2>
+<div class="card scroll"><table id="causes"></table></div>
+
+@@FALLBACK:current-failures-by-cause@@
+</section>
+<section id="one-axis-at-a-time" class="subsection">
+<h2>One axis at a time</h2>
+<div class="cols" id="axes"></div>
+
+@@FALLBACK:one-axis-at-a-time@@
+</section>
+<section id="fixed-since" class="subsection">
+<h2>Fixed since</h2>
+<p class="mut" id="fxnote"></p>
+<div class="card scroll"><table id="fixed"></table></div>
+
+@@FALLBACK:fixed-since@@
+</section>
+</article>
+<article id="issues" class="panel" aria-labelledby="tab-issues" data-label="Issues">
+<section id="issues-from-the-corpus" class="subsection">
+<h2>Issues from the corpus</h2>
+<p class="mut" id="isnote"></p>
+<div class="card scroll"><svg id="sankey" viewBox="0 0 760 330" style="min-width:680px;width:100%;display:block" role="img" aria-label="Items run, their outcomes, failed items covered by issues, issues with a fix pull request, and the state of those pull requests"></svg></div>
+<p class="mut" id="swipe" style="font-size:13px;margin:4px 0 0">Swipe sideways on a narrow screen.</p>
+<div class="card scroll" style="margin-top:8px"><table id="istable"></table></div>
+
+@@FALLBACK:issues-from-the-corpus@@
+</section>
+</article>
+<article id="take-part" class="panel" aria-labelledby="tab-take-part" data-label="Take part">
+<section id="how-to-take-part" class="subsection">
 <h2>Take part</h2>
 <div class="card take">
 <p>Anyone can help, with or without an AI assistant, and no repo access is needed. Each batch is 100 small modelling tasks; build them, record what happened, and every failure becomes a bug report with the exact recipe attached.</p>
@@ -343,47 +638,10 @@ svg text{fill:var(--mut);font-size:10px}
 <p class="mut">Questions? <a href="@@REPO@@/issues/new">Open an issue</a>, or talk to the people working on it: <a href="https://discord.gg/yTcseBEdeu">join the Dutchman CAD Discord</a> and type <code>/stress-test</code>, which lets you into the #stress-corpus channel.</p>
 </div>
 
-<section id="solidcraft-vs-freecad" aria-labelledby="route-title">
-<h2 id="route-title"><a href="#solidcraft-vs-freecad">SolidCraft vs FreeCAD: all 10,000 items</a></h2>
-<p class="mut">The same tasks, two routes: built directly in SolidCraft, or built in FreeCAD and converted with Dutchman.</p>
-<div class="card"><table class="route-table" id="route-comparison" aria-labelledby="route-title"></table></div>
+@@FALLBACK:how-to-take-part@@
 </section>
-
-<h2>The grid</h2>
-<div class="bar"><span class="seg" id="pipes" role="group" aria-label="Grid route"></span></div>
-<p class="mut" id="gridroute" aria-live="polite"></p>
-<div class="bar"><span class="legend" id="legend"></span></div>
-<div class="card"><div id="gridwrap"><canvas id="grid" aria-label="Grid of all 10,000 tasks"></canvas></div>
-<div id="detail" class="mut">Hover or tap a cell for details.</div></div>
-<div id="tip"></div>
-
-<h2>Totals</h2>
-<div class="tot" id="totals"></div>
-<p class="mut" id="totnote"></p>
-
-<h2>Issues from the corpus</h2>
-<p class="mut" id="isnote"></p>
-<div class="card scroll"><svg id="sankey" viewBox="0 0 760 330" style="min-width:680px;width:100%;display:block" role="img" aria-label="Items run, their outcomes, failed items covered by issues, issues with a fix pull request, and the state of those pull requests"></svg></div>
-<p class="mut" id="swipe" style="font-size:13px;margin:4px 0 0">Swipe sideways on a narrow screen.</p>
-<div class="card scroll" style="margin-top:8px"><table id="istable"></table></div>
-
-<h2>Current failures by cause</h2>
-<div class="card scroll"><table id="causes"></table></div>
-
-<h2>Before stress test vs now</h2>
-<div id="cmp"><p class="mut">No before-stress-test results to compare with.</p></div>
-
-<h2>Fixed since</h2>
-<p class="mut" id="fxnote"></p>
-<div class="card scroll"><table id="fixed"></table></div>
-
-<h2>Where the fails are</h2>
-<p class="mut">Fail rate by operation and topology: fails out of done. A dash means nothing has been run there yet. Only tasks with a result count.</p>
-<div class="card scroll"><table id="heat"></table></div>
-
-<h2>One axis at a time</h2>
-<div class="cols" id="axes"></div>
-
+</article>
+</div><aside id="outline" aria-label="On this tab"></aside></div>
 <footer><p><a href="@@REPO@@">Repository</a> &middot; <a href="@@REPO@@#readme">README</a> &middot; Last updated @@UPDATED@@</p></footer>
 </main>
 <script>
@@ -422,7 +680,10 @@ function colour(r){
 }
 var geo={};
 function drawGrid(){
-  var cv=$("grid"),W=$("gridwrap").clientWidth,lab=W<500?22:30,cw=(W-lab)/B,ch=Math.max(cw,3),H=Math.ceil(ch*B);
+  var cv=$("result-grid");if(!cv.closest(".panel").hidden){drawVisibleGrid()}
+}
+function drawVisibleGrid(){
+  var cv=$("result-grid"),W=$("gridwrap").clientWidth,lab=W<500?22:30,cw=(W-lab)/B,ch=Math.max(cw,3),H=Math.ceil(ch*B);
   var dpr=window.devicePixelRatio||1;
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);cv.style.height=H+"px";
   var g=cv.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
@@ -439,7 +700,7 @@ function drawGrid(){
   for(var r=0;r<rows;r+=every){var t=r+1;g.fillText(t<10?"0"+t:""+t,lab-4,r*ch+ch/2)}
 }
 function cellAt(ev){
-  var cv=$("grid"),rc=cv.getBoundingClientRect(),x=ev.clientX-rc.left-geo.lab,y=ev.clientY-rc.top;
+  var cv=$("result-grid"),rc=cv.getBoundingClientRect(),x=ev.clientX-rc.left-geo.lab,y=ev.clientY-rc.top;
   if(x<0)return -1;
   var c=Math.floor(x/geo.cw),r=Math.floor(y/geo.ch);
   if(c<0||c>=B||r<0)return -1;var n=r*B+c;return n<N?n:-1;
@@ -452,7 +713,7 @@ function describe(n){
   return{h:h,link:r&&r[2]};
 }
 function wire(){
-  var cv=$("grid"),tip=$("tip");
+  var cv=$("result-grid"),tip=$("tip");
   cv.addEventListener("mousemove",function(e){var n=cellAt(e);if(n<0){tip.style.display="none";return}
     tip.innerHTML=describe(n).h;tip.style.display="block";
     var x=e.clientX+14,y=e.clientY+14;if(x+330>innerWidth)x=Math.max(4,e.clientX-334);if(y+120>innerHeight)y=e.clientY-110;
@@ -480,7 +741,7 @@ function routeComparison(){
     if(x[0]===5&&!cs.some(function(c){return c[5]}))return;
     rows.push([NAMES[x[0]],x[1],function(c){return c[x[0]]}]);
   });
-  var h='<caption>Latest committed result per item and route, using the same counts as Totals below. Each route covers '+N.toLocaleString()+' tasks. Missing history measurements mean “Not recorded”.</caption>'
+  var h='<caption>Latest committed result per item and route. Each route covers '+N.toLocaleString()+' tasks. Missing history measurements mean “Not recorded”.</caption>'
     +'<thead><tr><th scope="col">Outcome</th><th scope="col">SolidCraft<small>Direct build</small></th><th scope="col">FreeCAD<small>via Dutchman</small></th></tr></thead><tbody>';
   rows.forEach(function(row,i){h+='<tr'+(i===0?' class="built"':'')+'><th scope="row">'+esc(row[0])+'<small>'+esc(row[1])+'</small></th>'
     +cs.map(function(c){return '<td>'+row[2](c).toLocaleString()+'</td>'}).join("")+'</tr>'});
@@ -488,16 +749,13 @@ function routeComparison(){
     +routes.map(function(p){var t=(D.history||{})[p];return '<td>'+(t?t.mapped.toLocaleString()+' / '+t.total.toLocaleString()+'<small>'+pct(t.mapped,t.total)+'</small>':'<span class="mut">Not recorded</span>')+'</td>'}).join("")+'</tr></tbody>';
   $("route-comparison").innerHTML=h;
 }
-function totals(){
-  var c=counts(),done=0,fails=0;
-  for(var i=0;i<6;i++){done+=c[i];if(FAILS[i])fails+=c[i]}
-  var tried=done+c[6]+c[7];
-  var cards=[["Done",done+" of "+N.toLocaleString()],["Fail rate",pct(fails,done)+" ("+fails+" of "+done+")"]];
-  for(var i=0;i<OUT.length;i++)cards.push([NAMES[i],String(c[i])]);
-  var hist=(D.history||{})[cur]; if(hist)cards.push(["History mapped",hist.mapped.toLocaleString()+" of "+hist.total.toLocaleString()]);
-  cards.push(["Not started",String(N-tried)]);
-  $("totals").innerHTML=cards.map(function(x){return"<div><span class=mut>"+x[0]+"</span><b>"+esc(x[1])+"</b></div>"}).join("");
-  $("totnote").textContent="Done means a downstream outcome. Skipped tasks and FreeCAD source failures are left out of every failure rate.";
+function headline(){
+  var c=counts(),st=D.progress[cur]||{fixed:0,reg:0};
+  var values=[N,c[0]+c[1],c[2]+c[3],c[4],D.issues.issues.length,st.fixed];
+  document.querySelectorAll('#headline-stats .stat b').forEach(function(el,i){el.textContent=values[i].toLocaleString()});
+  $('headline-route').textContent=label(cur)+' · latest committed results';
+  var badge=$('progress-badge');badge.textContent=st.reg;badge.hidden=!st.reg;
+  badge.setAttribute('aria-label',st.reg+(st.reg===1?' regression':' regressions'));
 }
 function pipelineIssues(){
   var urls={};
@@ -592,7 +850,7 @@ function fixedSince(){
   var h='<tr><th class="l">Cause</th><th>Before</th><th>Now</th><th>Fixed</th><th class="l">Items</th></tr>';
   F.groups.forEach(function(g){
     var c=g.issue?'<a href="'+esc(g.issue)+'">'+esc(g.cause)+"</a>":esc(g.cause);
-    h+='<tr><td style="text-align:left;white-space:normal;min-width:220px">'+c+"</td><td>"+esc(g.from)+"</td><td>"+esc(g.to)+"</td><td>"+g.items.length+'</td><td style="text-align:left;white-space:normal">'+esc(g.items.slice(0,40).join(" "))+(g.items.length>40?" …":"")+"</td></tr>"});
+    h+='<tr><td style="text-align:left;white-space:normal;min-width:220px">'+c+"</td><td>"+esc(g.from)+"</td><td>"+esc(g.to)+"</td><td>"+g.items.length+'</td><td style="text-align:left;white-space:normal">'+itemList(g.items)+"</td></tr>"});
   $("fixed").innerHTML=h;
 }
 function shade(rate){var a=Math.min(1,.12+rate*.88);return"color-mix(in srgb, "+css("--fail")+" "+Math.round(a*100)+"%, transparent)"}
@@ -644,22 +902,18 @@ function cmpDraw(cv,wrap,get,mark){
 function cmpCell(cv,geo,ev){var rc=cv.getBoundingClientRect(),x=ev.clientX-rc.left-geo.lab,y=ev.clientY-rc.top;
   if(x<0)return -1;var c=Math.floor(x/geo.cw),r=Math.floor(y/geo.ch);if(c<0||c>=B||r<0)return -1;var n=r*B+c;return n<N?n:-1}
 function compare(){
+  if($("progress").hidden)return;
   var C=D.compare,box=$("cmp");
+  $("progress-banner").innerHTML="";
   if(!C){box.innerHTML='<p class="mut">No before-stress-test results to compare with.</p>';return}
   if(!C.then||!C.then[cur]){box.innerHTML='<p class="mut">No before-stress-test results for this pipeline.</p>';return}
   var T=(C.then&&C.then[cur])||{},R=D.results[cur]||{},BL=(C.builds&&C.builds[cur])||{};
-  var st={fixed:0,reg:0,still:0,rerun:0,notyet:0,thenFail:0,fixedIds:[],regIds:[]};
-  var chg={};
-  for(var k in T){var a=T[k][0],b=R[k]?R[k][0]:6;
-    if(BL[k])st.rerun++;
-    if(FAILS[a]){st.thenFail++;if(!BL[k])st.notyet++;
-      if(PASS[b]){st.fixed++;chg[k]="fix";st.fixedIds.push(+k)}else st.still++}
-    else if(PASS[a]&&FAILS[b]){st.reg++;chg[k]="reg";st.regIds.push(+k)}
-    else if(a!==b&&BL[k])chg[k]="chg"}
+  var st=D.progress[cur],chg=st.changes;
   var newest=C.newest||"",any=st.rerun>0;
   var ban=st.reg?'<div id="regban" class="bad" role="alert">'+st.reg+' regression'+(st.reg>1?"s":"")+': passed before the stress test, fails now.<small>Outlined in red in the right grid and listed below.</small></div>'
     :'<div id="regban" role="status">No regressions. Nothing that passed before the stress test fails now.'+(any?"":'<small>Nothing has been re-run yet.</small>')+'</div>';
-  var h=ban;
+  $("progress-banner").innerHTML=ban;
+  var h="";
   h+=any?'<p class="mut">'+st.rerun+' items have been re-run on a newer build'+(newest?", the newest being "+esc(newest):"")+'. Items that were not re-run keep their before-stress-test result on the right.</p>'
     :'<p><b>Nothing has been re-run yet, so the two grids are identical.</b> When failed items are re-run on a newer build, the right grid updates and the changed cells get an outline.</p>';
   h+='<p class="legend mut"><span><i class="ol"></i>Changed since before the stress test</span><span><i class="ol r"></i>Regression</span></p>';
@@ -687,16 +941,71 @@ function compare(){
       tip.style.display="block";var x=e.clientX+14,y=e.clientY+14;if(x+330>innerWidth)x=Math.max(4,e.clientX-334);if(y+100>innerHeight)y=e.clientY-90;tip.style.left=x+"px";tip.style.top=y+"px"});
     p[0].addEventListener("mouseleave",function(){tip.style.display="none"})});
 }
+function itemList(items){
+  return '<details class="item-list"><summary>'+items.length+' item IDs</summary><p>'+esc(items.join(' '))+'</p></details>';
+}
 function causeTable(){
   var groups=(D.causes||[]).filter(function(g){return g.pipeline===cur});
   var h='<tr><th class="l">Cause</th><th>Failed items</th><th class="l">Items</th></tr>';
   groups.forEach(function(g){var c=g.issue?'<a href="'+esc(g.issue)+'">'+esc(g.cause)+'</a>':esc(g.cause);
-    h+='<tr><td style="text-align:left;white-space:normal;min-width:220px">'+c+'</td><td>'+g.items.length+'</td><td style="text-align:left;white-space:normal">'+esc(g.items.join(" "))+'</td></tr>'});
+    h+='<tr><td style="text-align:left;white-space:normal;min-width:220px">'+c+'</td><td>'+g.items.length+'</td><td style="text-align:left;white-space:normal">'+itemList(g.items)+'</td></tr>'});
   $("causes").innerHTML=groups.length?h:'<tr><td>No current failures for this pipeline.</td></tr>';
 }
-function all(){$("gridroute").textContent=label(cur)+" · the grid and breakdowns below show this route.";$("grid").setAttribute("aria-label",label(cur)+": grid of all "+N.toLocaleString()+" tasks");causeTable();drawGrid();totals();tables();sankey();issueTable();compare();fixedSince()}
-routeComparison();legend();buildPipes();wire();all();
-var rt;addEventListener("resize",function(){clearTimeout(rt);rt=setTimeout(function(){drawGrid();compare()},100)});
+
+function collapseTables(){
+  document.querySelectorAll('.panel table').forEach(function(table){
+    var rows=Array.from(table.rows).filter(function(row){return row.querySelector('td')});
+    var host=table.closest('.scroll')||table.parentElement;
+    var button=host.nextElementSibling;
+    if(button&&button.classList.contains('table-toggle'))button.remove();
+    if(rows.length<=10)return;
+    var expanded=table.dataset.expanded==='true';
+    rows.forEach(function(row,i){row.hidden=i>=10&&!expanded});
+    button=document.createElement('button');button.className='table-toggle';
+    if(!table.id)table.id='table-'+Array.from(document.querySelectorAll('table')).indexOf(table);
+    button.setAttribute('aria-controls',table.id);
+    function update(){button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'Show top 10':'Show all '+rows.length+' rows'}
+    update();button.onclick=function(){expanded=!expanded;table.dataset.expanded=String(expanded);rows.forEach(function(row,i){row.hidden=i>=10&&!expanded});update()};
+    host.after(button);
+  });
+}
+function setupTabs(){
+  var tabs=Array.from(document.querySelectorAll('.tabbar a'));
+  var panels=Array.from(document.querySelectorAll('.panel'));
+  document.documentElement.classList.add('enhanced');
+  document.querySelector('.tabbar').setAttribute('role','tablist');
+  document.querySelector('.tabbar').setAttribute('aria-label','Results sections');
+  tabs.forEach(function(tab,i){
+    tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panels[i].id);
+    panels[i].setAttribute('role','tabpanel');
+    tab.addEventListener('keydown',function(e){
+      var next=e.key==='ArrowRight'?(i+1)%tabs.length:e.key==='ArrowLeft'?(i+tabs.length-1)%tabs.length:e.key==='Home'?0:e.key==='End'?tabs.length-1:-1;
+      if(next<0)return;e.preventDefault();tabs[next].focus();
+      if(location.hash===tabs[next].hash)activate(true);else location.hash=tabs[next].hash;
+    });
+    tab.addEventListener('click',function(){if(location.hash===tab.hash)activate(true)});
+  });
+  function activate(scroll){
+    var id;try{id=decodeURIComponent(location.hash.slice(1))}catch(e){id='overview'}
+    var target=$(id||'overview'),panel=target&&(target.classList.contains('panel')?target:target.closest('.panel'));
+    if(!panel)panel=$('overview');
+    panels.forEach(function(p,i){var active=p===panel;p.hidden=!active;tabs[i].setAttribute('aria-selected',String(active));tabs[i].tabIndex=active?0:-1});
+    var selected=tabs[panels.indexOf(panel)];
+    // Keep the selected tab visible without moving the page vertically.
+    var bar=selected.parentElement;bar.scrollLeft=Math.max(0,selected.offsetLeft-bar.offsetLeft-(bar.clientWidth-selected.offsetWidth)/2);
+    var links=Array.from(panel.querySelectorAll('.subsection, #solidcraft-vs-freecad'));
+    $('outline').innerHTML='<p>On this tab</p>'+links.map(function(s){return '<a href="#'+s.id+'"'+(target===s?' aria-current="location"':'')+'>'+esc(s.querySelector('h2').textContent)+'</a>'}).join('');
+    drawGrid();compare();collapseTables();
+    target=$(id||panel.id);
+    if(scroll&&target)target.scrollIntoView({block:'start'});
+  }
+  addEventListener('hashchange',function(){activate(true)});
+  activate(!!location.hash);
+}
+
+function all(){$("route-context").innerHTML='Viewing '+esc(label(cur))+' results · <a href="#grid">Change route</a>';$("gridroute").textContent=label(cur)+" · the grid and breakdowns show this route.";$("result-grid").setAttribute("aria-label",label(cur)+": grid of all "+N.toLocaleString()+" tasks");causeTable();drawGrid();headline();tables();sankey();issueTable();compare();fixedSince();collapseTables()}
+routeComparison();legend();buildPipes();wire();all();setupTabs();
+var rt;addEventListener("resize",function(){clearTimeout(rt);rt=setTimeout(function(){drawGrid();compare();collapseTables()},100)});
 if(matchMedia)matchMedia("(prefers-color-scheme:dark)").addEventListener("change",all);
 </script>
 </body>
