@@ -44,3 +44,56 @@ class Site(unittest.TestCase):
                                      ('solidcraft', 'freecad-dutchman')], {})
         self.assertEqual(len(groups), 2)
         self.assertEqual({g['pipeline'] for g in groups}, {'solidcraft', 'freecad-dutchman'})
+
+    def test_render_preserves_anchors_and_no_script_results(self):
+        from contextlib import redirect_stdout
+        from html.parser import HTMLParser
+        from io import StringIO
+
+        class Elements(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.ids = []
+                self.panels = []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if 'id' in attrs:
+                    self.ids.append(attrs['id'])
+                if tag == 'article':
+                    self.panels.append(attrs['id'])
+
+        items = list(load_items().values())[:3]
+        records = [dict(id=it['id'], pipeline='solidcraft', outcome=outcome,
+                        signature='<bad> @ build') for it, outcome in
+                   zip(items, ['correct', 'wrong-result', 'hang'])]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'results').mkdir()
+            (root / 'items.jsonl').write_text(''.join(json.dumps(i)+'\n' for i in items))
+            (root / 'results/batch-01.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in records))
+            with patch.object(site, 'ROOT', tmp), patch.object(site, 'snapshot_results', return_value=None):
+                data = site.build()
+                with patch.object(site, 'build', return_value=data), redirect_stdout(StringIO()):
+                    self.assertEqual(site.main(), 0)
+            page = (root / 'site/index.html').read_text()
+            self.assertEqual(json.loads((root / 'site/data.json').read_text()), data)
+        parser = Elements()
+        parser.feed(page)
+        self.assertEqual(len(parser.ids), len(set(parser.ids)), 'Duplicate IDs break hash navigation')
+        self.assertEqual(parser.panels, ['overview', 'grid', 'failures', 'issues', 'take-part'])
+        for anchor in ['solidcraft-vs-freecad', 'route-title', 'totals', 'before-stress-test-vs-now',
+                       'the-grid', 'where-the-fails-are', 'current-failures-by-cause',
+                       'one-axis-at-a-time', 'fixed-since', 'issues-from-the-corpus', 'how-to-take-part']:
+            self.assertIn(anchor, parser.ids)
+        self.assertNotIn('@@', page)
+        content = site.static_content(data)
+        self.assertEqual(content['stats'].count('class="stat"'), 6)
+        self.assertIn('<b>3</b><span>Items</span>', content['stats'])
+        self.assertIn('<b>1</b><span>Correct</span>', content['stats'])
+        self.assertIn('<b>1</b><span>Wrong</span>', content['stats'])
+        self.assertIn('<b>1</b><span>Hangs</span>', content['stats'])
+        self.assertIn('&lt;bad&gt;', content['current-failures-by-cause'])
+        self.assertIn(items[1]['id'], content['current-failures-by-cause'])
+        self.assertIn('<svg', content['the-grid'])
+        self.assertIn('<noscript>', content['solidcraft-vs-freecad'])
