@@ -70,6 +70,7 @@ def build():
             r.get("build") or r.get("version") or "")
     issues = load_issues()
     fixed = fixed_since(reruns, earlier, issues)
+    comparison = compare(index, results, builds, issues)
     return {
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "batch": BATCH,
@@ -82,7 +83,8 @@ def build():
         "fixed": fixed,
         "causes": current_causes(latest.values(), issues),
         "history": history_totals(latest.values()),
-        "compare": compare(index, results, builds, issues),
+        "compare": comparison,
+        "progress": progress_totals(comparison, results),
         "repo": REPO,
     }
 
@@ -150,6 +152,39 @@ def compare(index, results, builds, issues):
         c["builds"] = sorted(c["builds"])
     return {"label": SNAPSHOT_LABEL, "then": then, "builds": builds,
             "newest": newest_build(builds), "causes": out}
+
+
+def progress_totals(comparison, results):
+    """Snapshot failures now passing, and regressions, shared by every progress display."""
+    out = {}
+    if not comparison:
+        return out
+    for pipe, then in comparison['then'].items():
+        now = results.get(pipe, {})
+        builds = comparison['builds'].get(pipe, {})
+        st = dict(fixed=0, reg=0, still=0, rerun=0, notyet=0, thenFail=0,
+                  fixedIds=[], regIds=[], changes={})
+        for n, old in then.items():
+            a, b = old[0], now.get(n, [6])[0]
+            rerun = bool(builds.get(n))
+            st['rerun'] += rerun
+            if a in (2, 3, 4, 5):
+                st['thenFail'] += 1
+                st['notyet'] += not rerun
+                if b in (0, 1):
+                    st['fixed'] += 1
+                    st['fixedIds'].append(int(n))
+                    st['changes'][n] = 'fix'
+                else:
+                    st['still'] += 1
+            elif a in (0, 1) and b in (2, 3, 4, 5):
+                st['reg'] += 1
+                st['regIds'].append(int(n))
+                st['changes'][n] = 'reg'
+            elif a != b and rerun:
+                st['changes'][n] = 'chg'
+        out[pipe] = st
+    return out
 
 
 def put(results, index, r):
@@ -278,18 +313,21 @@ def static_content(data):
             col = colors[r[0]] if r else 'none'
             paths.setdefault(col, []).append('M%d %dh1v1h-1z' % (n % BATCH, n // BATCH))
         cells = ''.join('<path fill="var(--%s)" d="%s"/>' % (col, ''.join(parts)) for col, parts in paths.items())
-        return '<svg class="fallback-grid" role="img" aria-label="All tasks in ID order; outcome counts in the totals table" viewBox="0 0 %d %d">%s</svg>' % (
+        return '<svg class="fallback-grid" role="img" aria-label="All tasks in ID order; outcome counts in the route comparison table" viewBox="0 0 %d %d">%s</svg>' % (
             BATCH, max(1, (len(data['items']) + BATCH - 1) // BATCH), cells)
 
     c = counts('solidcraft')
-    fixed = sum(len(g['items']) for g in data['fixed']['groups'] if g['pipeline'] == 'solidcraft')
+    fixed = data['progress'].get('solidcraft', {}).get('fixed', 0)
     stats = [('Items', len(data['items']), 'In the corpus'), ('Correct', c[0] + c[1], 'Including correct refusals'),
-             ('Wrong', c[2] + c[3], 'Results and refusals'), ('Hangs', c[4], 'Time limit exceeded'),
-             ('Issues filed', len(data['issues']['issues']), 'Across the corpus'), ('Fixed', fixed, 'SolidCraft items now passing')]
+             ('Wrong', c[2] + c[3], 'wrong results + wrong refusals'), ('Hangs', c[4], 'Time limit exceeded'),
+             ('Issues filed', len(data['issues']['issues']), 'Across the corpus'), ('Fixed', fixed, 'Failed before stress test; now passing')]
     content = {'stats': ''.join('<div class="stat"><b>' + format(n, ',') + '</b><span>' + label + '</span><small>' + note + '</small></div>' for label, n, note in stats)}
-    fallback = {key: '' for key in ('totals', 'solidcraft-vs-freecad', 'the-grid', 'where-the-fails-are',
+    regressions = data['progress'].get('solidcraft', {}).get('reg', 0)
+    content['regressions'] = '<span id="progress-badge" class="regression-badge" aria-label="%d regressions"%s>%d</span>' % (regressions, '' if regressions else ' hidden', regressions)
+    fallback = {key: '' for key in ('solidcraft-vs-freecad', 'the-grid', 'where-the-fails-are',
                                   'current-failures-by-cause', 'one-axis-at-a-time', 'fixed-since',
                                   'before-stress-test-vs-now', 'issues-from-the-corpus')}
+    fallback['progress-banner'] = '<div class="regression-banner%s">%d regressions: passed before the stress test, fails now.</div>' % (' bad' if regressions else '', regressions) if data['compare'] else ''
     if not data['compare']:
         fallback['before-stress-test-vs-now'] = '<p>No before-stress-test results to compare with.</p>'
     routes = [('solidcraft', 'SolidCraft'), ('freecad-dutchman', 'FreeCAD via Dutchman')]
@@ -305,13 +343,7 @@ def static_content(data):
             continue
         heading = '<h3>' + label + '</h3>'
         results = data['results'][pipe]
-        c = counts(pipe)
-        done = sum(c[:6])
-        fails = sum(c[2:6])
         rate = lambda a, b: ('%.1f%%' % (100 * a / b)) if b else '-'
-        rows = [('Done', str(done) + ' of ' + str(len(data['items']))), ('Fail rate', rate(fails, done) + ' (%d of %d)' % (fails, done))]
-        rows += list(zip(names, c)) + [('Not started', len(data['items']) - sum(c))]
-        fallback['totals'] += heading + table(['Outcome', 'Count'], rows)
         fallback['the-grid'] += heading + '<p>Each row is one batch of 100. Red is a bug found; grey is not tried yet. Green: pass; yellow: hang or crash; purple: source failed.</p>' + grid(results)
         groups = [g for g in data['causes'] if g['pipeline'] == pipe]
         fallback['current-failures-by-cause'] += heading + table(['Cause', 'Failed items', 'Items'], [
@@ -344,9 +376,10 @@ def static_content(data):
         if comp and pipe in comp['then']:
             then = comp['then'][pipe]
             builds = comp['builds'].get(pipe, {})
-            fixed = sum(r[0] in (2, 3, 4, 5) and results.get(n, [6])[0] in (0, 1) for n, r in then.items())
-            regressions = [n for n, r in then.items() if r[0] in (0, 1) and results.get(n, [6])[0] in (2, 3, 4, 5)]
-            fallback['before-stress-test-vs-now'] += heading + '<p>%d items re-run. %d failing items now pass. %d regressions.</p>' % (sum(bool(b) for b in builds.values()), fixed, len(regressions))
+            st = data['progress'][pipe]
+            fixed = st['fixed']
+            regressions = [str(n) for n in st['regIds']]
+            fallback['before-stress-test-vs-now'] += heading + '<p>%d items re-run. %d failing items now pass. %d regressions.</p>' % (st['rerun'], fixed, st['reg'])
             fallback['before-stress-test-vs-now'] += '<h4>' + e(comp['label']) + '</h4>' + grid(then) + '<h4>Now</h4>' + grid(results)
             fallback['before-stress-test-vs-now'] += table(['Cause', 'Failing then', 'Now passing', 'Fixed by build'], [
                 (cause(g), g['then'], g['now'], e(', '.join(g['builds']))) for g in comp['causes'] if g['pipeline'] == pipe])
@@ -372,7 +405,7 @@ def main():
     safe = blob.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     page = PAGE.replace("/*DATA*/null", safe).replace("@@UPDATED@@", data["updated"]).replace("@@REPO@@", REPO)
     content = static_content(data)
-    page = page.replace("@@STATS@@", content.pop("stats"))
+    page = page.replace("@@STATS@@", content.pop("stats")).replace("@@REGRESSIONS@@", content.pop("regressions"))
     page = re.sub(r"@@FALLBACK:([\w-]+)@@", lambda m: content.get(m[1], ""), page)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
         f.write(page)
@@ -429,8 +462,8 @@ td.e{color:var(--mut)}
 @media (max-width:700px){.cmpcols{grid-template-columns:1fr}}
 .cmpcols h3{font-size:1rem;margin:0 0 6px}
 .cmpcols canvas{cursor:default}
-#regban{border-radius:8px;padding:12px 14px;font-weight:600;font-size:1.05rem;margin:8px 0;border:2px solid var(--pass);background:var(--card)}
-#regban.bad{border-color:var(--fail);background:var(--fail);color:#fff}
+.regression-banner,#regban{border-radius:8px;padding:12px 14px;font-weight:600;font-size:1.05rem;margin:8px 0;border:2px solid var(--pass);background:var(--card)}
+.regression-banner.bad,#regban.bad{border-color:var(--fail);background:var(--fail);color:#fff}
 #regban small{display:block;font-weight:400;font-size:.9rem}
 .ol{display:inline-block;width:12px;height:12px;border:2px solid var(--fg);vertical-align:-2px;margin-right:4px}
 .ol.r{border-color:var(--fail)}
@@ -465,6 +498,7 @@ h1{font-size:clamp(1.8rem,4vw,2.7rem);line-height:1.15;letter-spacing:-.04em;mar
 .primary{background:var(--accent);color:var(--card);border-color:var(--accent);font-weight:650;white-space:nowrap}
 .tabbar{position:sticky;top:0;z-index:4;display:flex;gap:5px;overflow-x:auto;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 0;scrollbar-width:thin}
 .tabbar a{flex:none;padding:9px 18px;border-radius:6px;text-decoration:none;color:var(--mut);font-size:.9rem;font-weight:650}
+.regression-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.25em;padding:0 5px;margin-left:4px;border-radius:99px;background:var(--fail);color:#fff;font-size:.7rem;line-height:1.6}.regression-badge[hidden]{display:none}
 .tabbar a:hover{background:var(--tint);color:var(--accent)}
 .tabbar [aria-selected=true]{background:var(--fg);color:var(--bg)}
 :focus-visible{outline:3px solid var(--accent);outline-offset:4px}
@@ -509,6 +543,7 @@ p,li,td{overflow-wrap:anywhere}
 <nav class="tabbar" aria-label="Results sections">
 <a id="tab-overview" href="#overview">Overview</a>
 <a id="tab-grid" href="#grid">Grid</a>
+<a id="tab-progress" href="#progress">Progress @@REGRESSIONS@@</a>
 <a id="tab-failures" href="#failures">Failures</a>
 <a id="tab-issues" href="#issues">Issues</a>
 <a id="tab-take-part" href="#take-part">Take part</a>
@@ -517,27 +552,15 @@ p,li,td{overflow-wrap:anywhere}
 <div class="workspace"><div class="panels">
 <article id="overview" class="panel" aria-labelledby="tab-overview" data-label="Overview">
 <section id="headline-totals" class="subsection">
-<h2>At a glance</h2><p class="mut">SolidCraft · latest committed results</p><div class="stats" id="headline-stats">@@STATS@@</div>@@FALLBACK:headline-totals@@
-</section>
-<section id="outcome-totals" class="subsection">
-<h2>Totals</h2>
-<div class="tot" id="totals"></div>
-<p class="mut" id="totnote"></p>
-
-@@FALLBACK:totals@@
+<span id="outcome-totals"></span><span id="totals"></span>
+<h2>At a glance</h2><p class="mut" id="headline-route">SolidCraft · latest committed results</p><div class="stats" id="headline-stats">@@STATS@@</div>
+<p class="mut" id="totnote">Done means a downstream outcome. Skipped tasks and FreeCAD source failures are left out of every failure rate.</p>
 </section>
 <section id="solidcraft-vs-freecad" aria-labelledby="route-title">
 <h2 id="route-title"><a href="#solidcraft-vs-freecad">SolidCraft vs FreeCAD: all 10,000 items</a></h2>
 <p class="mut">The same tasks, two routes: built directly in SolidCraft, or built in FreeCAD and converted with Dutchman.</p>
 <div class="card"><table class="route-table" id="route-comparison" aria-labelledby="route-title"></table></div>
 @@FALLBACK:solidcraft-vs-freecad@@</section>
-
-<section id="before-stress-test-vs-now" class="subsection">
-<h2>Before stress test vs now</h2>
-<div id="cmp"><p class="mut">No before-stress-test results to compare with.</p></div>
-
-@@FALLBACK:before-stress-test-vs-now@@
-</section>
 </article>
 <article id="grid" class="panel" aria-labelledby="tab-grid" data-label="Grid">
 <section id="the-grid" class="subsection">
@@ -558,6 +581,15 @@ p,li,td{overflow-wrap:anywhere}
 <div class="card scroll"><table id="heat"></table></div>
 
 @@FALLBACK:where-the-fails-are@@
+</section>
+</article>
+<article id="progress" class="panel" aria-labelledby="tab-progress" data-label="Progress">
+<section id="before-stress-test-vs-now" class="subsection">
+<div id="progress-banner">@@FALLBACK:progress-banner@@</div>
+<h2>Before stress test vs now</h2>
+<div id="cmp"><p class="mut">No before-stress-test results to compare with.</p></div>
+
+@@FALLBACK:before-stress-test-vs-now@@
 </section>
 </article>
 <article id="failures" class="panel" aria-labelledby="tab-failures" data-label="Failures">
@@ -709,7 +741,7 @@ function routeComparison(){
     if(x[0]===5&&!cs.some(function(c){return c[5]}))return;
     rows.push([NAMES[x[0]],x[1],function(c){return c[x[0]]}]);
   });
-  var h='<caption>Latest committed result per item and route, using the same counts as Totals. Each route covers '+N.toLocaleString()+' tasks. Missing history measurements mean “Not recorded”.</caption>'
+  var h='<caption>Latest committed result per item and route. Each route covers '+N.toLocaleString()+' tasks. Missing history measurements mean “Not recorded”.</caption>'
     +'<thead><tr><th scope="col">Outcome</th><th scope="col">SolidCraft<small>Direct build</small></th><th scope="col">FreeCAD<small>via Dutchman</small></th></tr></thead><tbody>';
   rows.forEach(function(row,i){h+='<tr'+(i===0?' class="built"':'')+'><th scope="row">'+esc(row[0])+'<small>'+esc(row[1])+'</small></th>'
     +cs.map(function(c){return '<td>'+row[2](c).toLocaleString()+'</td>'}).join("")+'</tr>'});
@@ -717,16 +749,13 @@ function routeComparison(){
     +routes.map(function(p){var t=(D.history||{})[p];return '<td>'+(t?t.mapped.toLocaleString()+' / '+t.total.toLocaleString()+'<small>'+pct(t.mapped,t.total)+'</small>':'<span class="mut">Not recorded</span>')+'</td>'}).join("")+'</tr></tbody>';
   $("route-comparison").innerHTML=h;
 }
-function totals(){
-  var c=counts(),done=0,fails=0;
-  for(var i=0;i<6;i++){done+=c[i];if(FAILS[i])fails+=c[i]}
-  var tried=done+c[6]+c[7];
-  var cards=[["Done",done+" of "+N.toLocaleString()],["Fail rate",pct(fails,done)+" ("+fails+" of "+done+")"]];
-  for(var i=0;i<OUT.length;i++)cards.push([NAMES[i],String(c[i])]);
-  var hist=(D.history||{})[cur]; if(hist)cards.push(["History mapped",hist.mapped.toLocaleString()+" of "+hist.total.toLocaleString()]);
-  cards.push(["Not started",String(N-tried)]);
-  $("totals").innerHTML=cards.map(function(x){return"<div><span class=mut>"+x[0]+"</span><b>"+esc(x[1])+"</b></div>"}).join("");
-  $("totnote").textContent="Done means a downstream outcome. Skipped tasks and FreeCAD source failures are left out of every failure rate.";
+function headline(){
+  var c=counts(),st=D.progress[cur]||{fixed:0,reg:0};
+  var values=[N,c[0]+c[1],c[2]+c[3],c[4],D.issues.issues.length,st.fixed];
+  document.querySelectorAll('#headline-stats .stat b').forEach(function(el,i){el.textContent=values[i].toLocaleString()});
+  $('headline-route').textContent=label(cur)+' · latest committed results';
+  var badge=$('progress-badge');badge.textContent=st.reg;badge.hidden=!st.reg;
+  badge.setAttribute('aria-label',st.reg+(st.reg===1?' regression':' regressions'));
 }
 function pipelineIssues(){
   var urls={};
@@ -873,23 +902,18 @@ function cmpDraw(cv,wrap,get,mark){
 function cmpCell(cv,geo,ev){var rc=cv.getBoundingClientRect(),x=ev.clientX-rc.left-geo.lab,y=ev.clientY-rc.top;
   if(x<0)return -1;var c=Math.floor(x/geo.cw),r=Math.floor(y/geo.ch);if(c<0||c>=B||r<0)return -1;var n=r*B+c;return n<N?n:-1}
 function compare(){
-  if($("overview").hidden)return;
+  if($("progress").hidden)return;
   var C=D.compare,box=$("cmp");
+  $("progress-banner").innerHTML="";
   if(!C){box.innerHTML='<p class="mut">No before-stress-test results to compare with.</p>';return}
   if(!C.then||!C.then[cur]){box.innerHTML='<p class="mut">No before-stress-test results for this pipeline.</p>';return}
   var T=(C.then&&C.then[cur])||{},R=D.results[cur]||{},BL=(C.builds&&C.builds[cur])||{};
-  var st={fixed:0,reg:0,still:0,rerun:0,notyet:0,thenFail:0,fixedIds:[],regIds:[]};
-  var chg={};
-  for(var k in T){var a=T[k][0],b=R[k]?R[k][0]:6;
-    if(BL[k])st.rerun++;
-    if(FAILS[a]){st.thenFail++;if(!BL[k])st.notyet++;
-      if(PASS[b]){st.fixed++;chg[k]="fix";st.fixedIds.push(+k)}else st.still++}
-    else if(PASS[a]&&FAILS[b]){st.reg++;chg[k]="reg";st.regIds.push(+k)}
-    else if(a!==b&&BL[k])chg[k]="chg"}
+  var st=D.progress[cur],chg=st.changes;
   var newest=C.newest||"",any=st.rerun>0;
   var ban=st.reg?'<div id="regban" class="bad" role="alert">'+st.reg+' regression'+(st.reg>1?"s":"")+': passed before the stress test, fails now.<small>Outlined in red in the right grid and listed below.</small></div>'
     :'<div id="regban" role="status">No regressions. Nothing that passed before the stress test fails now.'+(any?"":'<small>Nothing has been re-run yet.</small>')+'</div>';
-  var h=ban;
+  $("progress-banner").innerHTML=ban;
+  var h="";
   h+=any?'<p class="mut">'+st.rerun+' items have been re-run on a newer build'+(newest?", the newest being "+esc(newest):"")+'. Items that were not re-run keep their before-stress-test result on the right.</p>'
     :'<p><b>Nothing has been re-run yet, so the two grids are identical.</b> When failed items are re-run on a newer build, the right grid updates and the changed cells get an outline.</p>';
   h+='<p class="legend mut"><span><i class="ol"></i>Changed since before the stress test</span><span><i class="ol r"></i>Regression</span></p>';
@@ -972,13 +996,14 @@ function setupTabs(){
     var links=Array.from(panel.querySelectorAll('.subsection, #solidcraft-vs-freecad'));
     $('outline').innerHTML='<p>On this tab</p>'+links.map(function(s){return '<a href="#'+s.id+'"'+(target===s?' aria-current="location"':'')+'>'+esc(s.querySelector('h2').textContent)+'</a>'}).join('');
     drawGrid();compare();collapseTables();
+    target=$(id||panel.id);
     if(scroll&&target)target.scrollIntoView({block:'start'});
   }
   addEventListener('hashchange',function(){activate(true)});
   activate(!!location.hash);
 }
 
-function all(){$("route-context").innerHTML='Viewing '+esc(label(cur))+' results · <a href="#grid">Change route</a>';$("gridroute").textContent=label(cur)+" · the grid and breakdowns show this route.";$("result-grid").setAttribute("aria-label",label(cur)+": grid of all "+N.toLocaleString()+" tasks");causeTable();drawGrid();totals();tables();sankey();issueTable();compare();fixedSince();collapseTables()}
+function all(){$("route-context").innerHTML='Viewing '+esc(label(cur))+' results · <a href="#grid">Change route</a>';$("gridroute").textContent=label(cur)+" · the grid and breakdowns show this route.";$("result-grid").setAttribute("aria-label",label(cur)+": grid of all "+N.toLocaleString()+" tasks");causeTable();drawGrid();headline();tables();sankey();issueTable();compare();fixedSince();collapseTables()}
 routeComparison();legend();buildPipes();wire();all();setupTabs();
 var rt;addEventListener("resize",function(){clearTimeout(rt);rt=setTimeout(function(){drawGrid();compare();collapseTables()},100)});
 if(matchMedia)matchMedia("(prefers-color-scheme:dark)").addEventListener("change",all);
