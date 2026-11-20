@@ -168,7 +168,8 @@ def body(it, su, sc, sheet=False):
     """The base body, and its frame: the face's plane z and outward direction o (+1 up, -1 down),
     the face centre C, hu, H, the face's outer loop picks (off every seam and feature)."""
     b = gen.body(su, sc, sheet, None)
-    fr = {"o": 1.0, "cx": 0.0, "cy": 0.0, "hu": b["hu"], "H": b["H"], "Wmin": b["Wmin"], "z0": b["z0"]}
+    fr = {"o": 1.0, "cx": 0.0, "cy": 0.0, "hu": b["hu"], "H": b["H"], "Wmin": b["Wmin"], "z0": b["z0"],
+          "pole": b.get("pole")}
     if sheet:
         return sheet_body(it, su, sc, b, fr)
     if su == "plane":
@@ -492,6 +493,8 @@ def op_step(it, op, su, sc, fr, e, to):
             # gen.py: a sphere of 1.2 Wmin centred on the point C of the ring (#106)
             it.add("solid.sphere", center=[cx, cy, fz], radius=f3(1.2 * fr["Wmin"]) / 2,
                    operation="intersect", targets=[PART])
+            # gen.order_after: only short arcs of the two circles stay, either side of C
+            fr["loop"] = [[cx - fr["Wmin"] / 2, cy, fz], [cx + fr["Wmin"] / 2, cy, fz]]
         else:
             if fr["bbox_c"] is None:
                 raise Unsupported("sphere at the bounding-box centre of a spline body")
@@ -509,8 +512,13 @@ def op_step(it, op, su, sc, fr, e, to):
             raise Unsupported("thread boss pointing down")
         cyl(it, n / 2, ln, cx, cy, fz, True, "join")
         it.add("solid.chamfer", edges=[[cx, cy - n / 2, fz + ln]], distance=pi)
-        it.add("solid.thread", face=[cx, cy - n / 2, fz + ln / 2], designation="M%sx%s" % (gen.fmt(n), gen.fmt(pi)),
-               modeled=True)
+        if n >= fr["Wmin"]:
+            # gen.op_step: the boss continues the body's side, so the thread runs the boss's straight part only
+            it.add("solid.thread", face=[cx, cy - n / 2, fz + ln / 2], designation="M%sx%s" % (gen.fmt(n), gen.fmt(pi)),
+                   modeled=True, extent="length", length=f3(ln - pi), **{"from": [cx, cy - n / 2, fz + ln - pi]})
+        else:
+            it.add("solid.thread", face=[cx, cy - n / 2, fz + ln / 2], designation="M%sx%s" % (gen.fmt(n), gen.fmt(pi)),
+                   modeled=True)
     elif op == "split":
         z = F(gen.fmt(gen.sig(fr["z0"] + 0.5 * fr["H"], 4)))
         it.add("solid.split_body", body=PART, plane={"origin": [0.0, 0.0, z], "normal": [0.0, 0.0, 1.0]})
@@ -527,8 +535,7 @@ def op_step(it, op, su, sc, fr, e, to):
                radius="%r mm" % fr["T"])
         fr["loop_unscripted"] = "blend of a loop after the sheet is bent"
     elif op == "offset face":
-        if to in gen.PADS_ON_FACE:
-            dep = f3(gen.sig(0.5 * gen.sig(0.12 * e)))  # half the pad height: the pads stay proud (#117)
+        dep = f3(gen.offset_dist(e, fr["H"], to, fr.get("pole")))
         it.add("solid.offset_face", faces=[[cx, cy, fz]], distance=dep)
         # the face moved out along its normal: so did its loop
         fr["loop"] = [[q[0], q[1], q[2] + fr["o"] * dep] for q in fr["loop"]]
