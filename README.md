@@ -61,7 +61,7 @@ Combinations that cannot be built (for example a sheet-metal bend on a sphere) a
 
 - `volume_mm3`: the total volume of all bodies, only when it is closed form for that exact item (1,070 items so far). If the field is missing, no value is claimed.
 - `bodies`: how many separate bodies the finished part has.
-- `refusal_ok`: true when a wall or gap in the item is under the kernel tolerance of 1e-5 mm, so refusing to build it is acceptable.
+- `refusal_ok`: true when a wall or gap in the item is under the kernel tolerance of 1e-5 mm, so refusing to build it is acceptable. Also true for a draft of a body that was hollowed first when the angle is at or above the largest one that keeps a wall (the brief names it), because the drafted side then closes the wall.
 
 ### Scripts for SolidCraft
 
