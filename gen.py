@@ -147,17 +147,17 @@ def body(surface, scale, sheet, rng):
         A, B, H = {"tiny": (4, 3, 2), "normal": (60, 40, 25), "huge": (2400, 1600, 1000),
                    "extreme ratio": (1000, 200, 1)}[scale]
         d["text"] = "a %s × %s × %s mm block, centred on the origin and resting on Z = 0" % (fmt(A), fmt(B), fmt(H))
-        d.update(Wmin=min(A, B), hu=A / 2.0, H=H)
+        d.update(Wmin=min(A, B), hu=A / 2.0, H=H, rims=[(math.hypot(A / 2.0, B / 2.0), 0.0), (math.hypot(A / 2.0, B / 2.0), H)])
     elif surface == "cylinder":
         D, H = {"tiny": (3, 4), "normal": (40, 60), "huge": (1200, 2400),
                 "extreme ratio": (1, 1000)}[scale]
         d["text"] = "a Ø%s × %s mm cylinder with a vertical axis through the origin, resting on Z = 0" % (fmt(D), fmt(H))
-        d.update(Wmin=D, hu=D / 2.0, H=H)
+        d.update(Wmin=D, hu=D / 2.0, H=H, rims=[(D / 2.0, 0.0), (D / 2.0, H)])
     elif surface == "cone":
         D1, D2, H = {"tiny": (4, 2, 3), "normal": (50, 20, 50), "huge": (2000, 800, 2000),
                      "extreme ratio": (6, 1, 1000)}[scale]
         d["text"] = "a cone frustum with a vertical axis through the origin, Ø%s mm at the bottom (Z = 0), Ø%s mm at the top, %s mm tall" % (fmt(D1), fmt(D2), fmt(H))
-        d.update(Wmin=D2, hu=D2 / 2.0, H=H)
+        d.update(Wmin=D2, hu=D2 / 2.0, H=H, rims=[(D1 / 2.0, 0.0), (D2 / 2.0, H)])
     elif surface == "sphere":
         D = {"tiny": 4, "normal": 50, "huge": 2400, "extreme ratio": 1000}[scale]
         R = D / 2.0
@@ -173,7 +173,8 @@ def body(surface, scale, sheet, rng):
             flat = 2 * math.sqrt(R * R - k * k)
             cut = "the plane Z = %s mm, leaving a flat of Ø%s mm" % (fmt(k), fmt(flat))
         d["text"] = "a sphere of Ø%s mm centred on the origin, with the top removed by %s; the body is the part below that plane" % (fmt(D), cut)
-        d.update(Wmin=flat, hu=flat / 2.0, H=R + k, F="flat cap face", z0=-R)
+        d.update(Wmin=flat, hu=flat / 2.0, H=R + k, F="flat cap face", z0=-R,
+                 rims=[(R, 0.0), (0.0, -R), (flat / 2.0, k)])
     elif surface == "torus":
         Dm, Dt = {"tiny": (3.6, 1.2), "normal": (60, 16), "huge": (3000, 800),
                   "extreme ratio": (1000, 1)}[scale]
@@ -186,7 +187,7 @@ def body(surface, scale, sheet, rng):
         A, B, H = {"tiny": (4, 3, 2), "normal": (60, 40, 25), "huge": (2400, 1600, 1000),
                    "extreme ratio": (1000, 200, 1)}[scale]
         d["text"] = "a %s mm tall extrusion, from Z = 0, of a closed spline outline (see below)%s" % (fmt(H), spline_text(A, B))
-        d.update(Wmin=0.8 * B, hu=A / 2.0, H=H)
+        d.update(Wmin=0.8 * B, hu=A / 2.0, H=H, rims=[(math.hypot(A / 2.0, B / 2.0), 0.0), (math.hypot(A / 2.0, B / 2.0), H)])
     if d["C"] is None:
         d["C"] = "the centre of the %s" % d["F"]
     if d["loop"] is None:
@@ -329,7 +330,20 @@ def pattern_step(b, e):
 PADS_ON_FACE = ("tangent edges", "coplanar faces", "vertex on an edge", "self-touching body")
 
 
-def op_step(op, b, e, scale, to=None, g=None):
+def intersect_dia(b, hollowed):
+    """Diameter of the sphere a boolean intersect keeps the body inside of. It reaches the
+    features, which sit up to hu from the axis and on the top face. On a hollowed body it also
+    contains the widest rim, so the sphere only rounds the body and never cuts a thin wall free."""
+    reach = 1.1 * math.sqrt(b["hu"] ** 2 + (b["H"] / 2.0) ** 2)
+    dia = max(1.2 * math.sqrt(b["Wmin"] ** 2 + b["H"] ** 2), 2 * reach)
+    if hollowed:
+        zc = b["z0"] + b["H"] / 2.0   # the bounding-box centre
+        far = max(math.hypot(r, z - zc) for r, z in b["rims"])
+        dia = max(dia, 2 * 1.05 * far)
+    return dia
+
+
+def op_step(op, b, e, scale, to=None, g=None, hollowed=False):
     F, C, loop = b["F"], b["C"], b["loop"]
     tor = b["su"] == "torus"   # its flat face faces -Z, the body is above it
     d = sig(0.1 * e)
@@ -387,9 +401,7 @@ def op_step(op, b, e, scale, to=None, g=None):
         if b["su"] == "torus":
             return ("Make a separate sphere of Ø%s mm centred on %s, and keep only the intersection of the body with it." % (
                 fmt(1.2 * b["Wmin"]), C))
-        # the sphere must reach the features, which sit up to hu from the axis and on the top face
-        reach = 1.1 * math.sqrt(b["hu"] ** 2 + (b["H"] / 2.0) ** 2)
-        dia = max(1.2 * math.sqrt(b["Wmin"] ** 2 + b["H"] ** 2), 2 * reach)
+        dia = intersect_dia(b, hollowed)
         return ("Make a separate sphere of Ø%s mm centred on the body's bounding-box centre, and keep only the intersection of the body with it." % (
             fmt(dia)))
     if op == "thread":
@@ -766,7 +778,7 @@ def brief_for(row):
     g = GAPS.get(gp)
     obj = rng.choice(OBJECTS[su]) if rng.random() < 0.6 else ""
     head = ("Like a %s: model " % obj) if obj else "Model "
-    steps = [order_before(orr, b, e, op, to), prelude(to, b, e, sc, g), op_step(op, b, e, sc, to, g),
+    steps = [order_before(orr, b, e, op, to), prelude(to, b, e, sc, g), op_step(op, b, e, sc, to, g, orr == "after shell"),
              order_after(orr, b, e, op, to)]
     hit = False
     if to in FEATURE:
