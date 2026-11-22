@@ -738,7 +738,10 @@ def volume_for(row, g, b, e, geo):
 
 # ------------------------------------------------------------------ brief
 FEATURE = {"tangent edges": "boss", "coplanar faces": "pads", "vertex on an edge": "pad",
-           "self-touching body": "cylinders", "thin wall near tolerance": "hole"}
+           "self-touching body": "cylinders", "thin wall near tolerance": "hole",
+           "feature at a seam or pole": "notch", "edge chain around a corner": "notch"}
+ROUNDS = ("fillet (constant)", "fillet (variable)", "chamfer")
+PATTERNS = ("pattern (linear)", "pattern (circular)", "pattern (along a path)")
 
 
 def in_reach(to, b, e, g, reach):
@@ -750,7 +753,167 @@ def in_reach(to, b, e, g, reach):
         return float(g) < reach
     if to in ("coplanar faces", "self-touching body"):
         return float(ex(inset(hu, e))) + s / 2.0 > hu - reach
+    if to in ("feature at a seam or pole", "edge chain around a corner"):
+        # the notch is centred on the edge, so it reaches half its width into the face
+        return pf(s) / 2.0 < reach
     return False
+
+
+def outline_points(su, sc, n=2048):
+    """Points on the outer edge of the face the features stand on, in the face's own
+    X, Y with the origin under the body's axis; None when the edge is not one loop."""
+    if su == "spline":
+        A, B = {"tiny": (4, 3), "normal": (60, 40), "huge": (2400, 1600), "extreme ratio": (1000, 200)}[sc]
+        P = []
+        for k in range(8):
+            th = k * math.pi / 4
+            f = 1 + 0.1 * math.sin(3 * th)
+            P.append((pf(0.5 * A * f * math.cos(th)), pf(0.5 * B * f * math.sin(th))))
+        # uniform periodic cubic through the points; close enough to decide a reach
+        m = len(P)
+        # second derivatives of the periodic interpolant: M[i-1] + 4 M[i] + M[i+1] = 6 (P[i+1] - 2 P[i] + P[i-1])
+        M = [(0.0, 0.0)] * m
+        for _ in range(200):
+            M = [tuple((6 * (P[(i + 1) % m][c] - 2 * P[i][c] + P[i - 1][c]) - M[i - 1][c] - M[(i + 1) % m][c]) / 4.0
+                       for c in (0, 1)) for i in range(m)]
+        out = []
+        for i in range(m):
+            p0, p1, m0, m1 = P[i], P[(i + 1) % m], M[i], M[(i + 1) % m]
+            for j in range(n // m):
+                t = j / float(n // m)
+                out.append(tuple((1 - t) * p0[c] + t * p1[c] + ((1 - t) ** 3 - (1 - t)) * m0[c] / 6.0
+                                 + (t ** 3 - t) * m1[c] / 6.0 for c in (0, 1)))
+        return out
+    return None
+
+
+def edge_clearance(su, sc, geo, x, y):
+    """Distance from a point of the face (body axis at the origin) to the face's outer edge."""
+    shape = geo.get("shape")
+    if shape and shape[0] == "rect":
+        return min(shape[1] - abs(x), shape[2] - abs(y))
+    if shape and su != "torus":
+        return shape[1] - math.hypot(x, y)
+    pts = outline_points(su, sc)
+    if pts is None:
+        return None
+    return min(math.hypot(x - px, y - py) for px, py in pts)
+
+
+def holes_in_reach(row, b, e, geo, reach):
+    """True when a row of pattern holes cut before the round stands within its reach."""
+    op, su, to, gp, sc, orr, pl = row
+    if su == "torus" or b.get("sheet"):
+        return False
+    if orr == "after pattern":
+        d, p = pf(sig(0.1 * e)), pf(sig(0.15 * e))
+        u = float(ex(inset(b["hu"], e)))
+        discs = [(-u, y, d / 2.0) for y in (-p, 0.0, p)]
+    elif op in PATTERNS:
+        d, p = pf(sig(0.1 * e)), pf(sig(0.15 * e))
+        if op == "pattern (linear)":
+            discs = [(0.0, y, d / 2.0) for y in (-p, 0.0, p)]
+        elif op == "pattern (circular)":
+            discs = [(1.5 * d * math.cos(k * math.pi / 3), 1.5 * d * math.sin(k * math.pi / 3), d / 2.0) for k in range(6)]
+        else:   # four holes p apart along an arc of radius 4p that curves toward +Y
+            R = 4 * p
+            discs = [(R * math.sin(k * p / R), R - R * math.cos(k * p / R), d / 2.0) for k in range(4)]
+    else:
+        return False
+    for x, y, q in discs:
+        c = edge_clearance(su, sc, geo, x, y)
+        if c is not None and c - q < reach:
+            return True
+    return False
+
+
+def brief_limits(row, b, e, g, geo):
+    """Steps the brief asks for that the body cannot take as written, found after the
+    batches were run. Each is (step index, sentence); every one makes a refusal acceptable."""
+    op, su, to, gp, sc, orr, pl = row
+    out = []
+    xr = sc == "extreme ratio"
+    rounds, verb = ("chamfer", "chamfer") if op == "chamfer" else ("fillet", "round")
+    # a Ø1 mm cap cut 0.00025 mm below the pole of a Ø1000 mm sphere: its edge is smooth
+    if su == "sphere" and xr:
+        ang = math.degrees(math.asin(0.5 / 500.0))
+        t = ("The flat cap meets the sphere at only %s° there, so that edge is smooth within any angular "
+             "tolerance: refuse if there is nothing to %s." % (("%.3f" % ang), "chamfer" if op == "chamfer" else "round"))
+        if op in ROUNDS:
+            out.append((2, t))
+        elif orr == "after fillet":
+            out.append((0, t.replace("chamfer.", "round.")))
+        elif orr == "before fillet":
+            out.append((3, t.replace("chamfer.", "round.")))
+    # a 3 degree draft over 1000 mm moves the side 52 mm, past the axis of a Ø1 top
+    if op == "draft" and xr and su in ("cylinder", "cone"):
+        H = b["H"]
+        out.append((2, "Over the %s mm height a 3° draft moves the side in by %s mm, far more than the top's "
+                       "0.5 mm radius, so the drafted side reaches the axis below the top: refuse if it cannot be built." % (
+                           fmt(H), fmt(H * math.tan(math.radians(3))))))
+    # the M1 thread's Ø1 boss is as wide as the Ø1 cylinder or the cone's Ø1 top
+    if op == "thread" and xr and su in ("cylinder", "cone"):
+        if su == "cylinder":
+            t = ("The boss is as wide as the Ø1 mm cylinder, so its side continues the cylinder's side as one face: "
+                 "refuse if the thread cannot be kept to the boss.")
+        else:
+            t = ("The boss is as wide as the cone's Ø1 mm top, so its bottom edge lies on the top face's rim and no "
+                 "top face is left around it: refuse if it cannot be built.")
+        out.append((2, t))
+    # the cap of a cut sphere moved outward past the sphere's pole
+    if op == "offset face" and su == "sphere":
+        dep = sig(0.5 * sig(0.12 * e)) if to in PADS_ON_FACE else sig(0.4 * min(b["H"], e))
+        room = -2 * b["z0"] - b["H"]        # R - k: from the cap to the pole
+        if pf(dep) >= room:
+            out.append((2, "That is more than the %s mm from the cap to the sphere's pole, so the sphere cannot be "
+                           "extended to meet the moved cap: refuse if it cannot be built." % (
+                               ("%.5f" % room).rstrip("0").rstrip(".") if room < 0.01 else fmt(room))))
+    # a round or chamfer of the loop that an earlier step already rounded, or bent
+    if orr == "after fillet" and op == "chamfer":
+        out.append((2, "Step (1) rounded that loop, so its edges are smooth (their faces meet tangentially): "
+                       "refuse if there is nothing to chamfer."))
+    if orr == "after fillet" and op == "sheet-metal flange":
+        out.append((2, "Step (1) rounded that edge, so it is smooth (its faces meet tangentially): refuse if the "
+                       "flange cannot be built on it."))
+    if orr == "before fillet" and op in ("sheet-metal flange", "sheet-metal bend"):
+        out.append((3, "The bend meets the face tangentially, so the loop now has smooth edges: round the others, "
+                       "or refuse if that cannot be built."))
+    # the thin-wall hole in a half torus breaks out through the side curving in above the flat face
+    if to == "thin wall near tolerance" and su == "torus" and g > 0:
+        r = b["hu"]
+        z = math.sqrt(r * r - (r - float(g)) ** 2)
+        out.append((1, "Above the flat face the torus side curves inward, so the hole breaks out through it about "
+                       "%s mm up and the wall is left only below that: refuse a later step that cannot be built on "
+                       "that sliver." % ("%.2g" % z)))
+    # pattern holes cut before a round of the loop stand within its reach
+    if op in ROUNDS and orr == "after pattern":
+        k = {"fillet (constant)": 0.07, "fillet (variable)": 0.14, "chamfer": 0.1}[op]
+        if holes_in_reach(row, b, e, geo, k * e):
+            out.append((2, "The holes stand within the %s's reach, so the %s runs into them: %s the edge up to "
+                           "them, or refuse if that cannot be built." % (rounds, rounds, verb)))
+    if op in PATTERNS and orr == "before fillet" and holes_in_reach(row, b, e, geo, fillet_r(op, "last", e)):
+        out.append((3, "The holes stand within the fillet's reach, so the fillet runs into them: round the edge up "
+                       "to them, or refuse if that cannot be built."))
+    return out
+
+
+def loose_pieces(row, b, e):
+    """Extra bodies a step leaves that the brief does not name. On a cone, a sphere that
+    keeps the middle of a hollow cone cuts the bottom wall free of the side wall."""
+    op, su, to, gp, sc, orr, pl = row
+    if not (su == "cone" and op == "boolean intersect" and orr == "after shell"):
+        return 0
+    D1, D2, H = {"tiny": (4, 2, 3), "normal": (50, 20, 50), "huge": (2000, 800, 2000),
+                 "extreme ratio": (6, 1, 1000)}[sc]
+    R1, R2 = D1 / 2.0, D2 / 2.0
+    w = pf(sig(0.06 * e))
+    reach = 1.1 * math.sqrt(b["hu"] ** 2 + (b["H"] / 2.0) ** 2)
+    rho = pf(max(1.2 * math.sqrt(b["Wmin"] ** 2 + b["H"] ** 2), 2 * reach)) / 2.0
+    zc = H / 2.0
+    cosa = H / math.hypot(H, R1 - R2)
+    r_in = R1 - (R1 - R2) * w / H - w / cosa       # the inner side wall where it meets the bottom wall
+    r_ball = math.sqrt(max(0.0, rho * rho - (w - zc) ** 2))
+    return 1 if r_ball <= r_in else 0
 
 
 def brief_for(row):
@@ -781,6 +944,11 @@ def brief_for(row):
             steps[idx] += (" The %s stands within the fillet's reach, so the fillet runs into it: "
                            "round the edge up to it, or refuse if that cannot be built." % FEATURE[to]
                            ).replace("fillet", "chamfer" if op == "chamfer" else "fillet")
+    geo = geom(su, sc, sheet)
+    for idx, note in brief_limits(row, b, e, g, geo):
+        if steps[idx]:
+            hit = True
+            steps[idx] += " " + note
     steps = [x for x in steps if x]
     text = head + b["text"] + "."
     if len(steps) == 1:
@@ -790,7 +958,8 @@ def brief_for(row):
     pt = placement_text(pl)
     if pt:
         text += " " + pt
-    exp = expected_for(row, g, b, e, geom(su, sc, sheet), hit)
+    exp = expected_for(row, g, b, e, geo, hit)
+    exp["bodies"] += loose_pieces(row, b, e)
     return obj, text, exp
 
 
