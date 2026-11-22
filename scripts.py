@@ -168,7 +168,8 @@ def body(it, su, sc, sheet=False):
     """The base body, and its frame: the face's plane z and outward direction o (+1 up, -1 down),
     the face centre C, hu, H, the face's outer loop picks (off every seam and feature)."""
     b = gen.body(su, sc, sheet, None)
-    fr = {"o": 1.0, "cx": 0.0, "cy": 0.0, "hu": b["hu"], "H": b["H"], "Wmin": b["Wmin"], "z0": b["z0"]}
+    fr = {"o": 1.0, "cx": 0.0, "cy": 0.0, "hu": b["hu"], "H": b["H"], "Wmin": b["Wmin"], "z0": b["z0"],
+          "rims": b.get("rims")}
     if sheet:
         return sheet_body(it, su, sc, b, fr)
     if su == "plane":
@@ -377,7 +378,7 @@ def fillet_loop(it, fr, r, to):
     it.add("solid.fillet", edges=loop_picks(fr), radius=r)
 
 
-def op_step(it, op, su, sc, fr, e, to):
+def op_step(it, op, su, sc, fr, e, to, hollowed=False):
     cx, cy, fz, out = fr["cx"], fr["cy"], fr["fz"], fr["o"] > 0
     d = f3(gen.sig(0.1 * e))
     dep = f3(gen.sig(0.4 * min(fr["H"], e)))
@@ -496,8 +497,7 @@ def op_step(it, op, su, sc, fr, e, to):
             if fr["bbox_c"] is None:
                 raise Unsupported("sphere at the bounding-box centre of a spline body")
             # #117: the sphere reaches the features, which sit up to hu from the axis on the top face
-            reach = 1.1 * math.sqrt(fr["hu"] ** 2 + (fr["H"] / 2.0) ** 2)
-            rad = f3(max(1.2 * math.sqrt(fr["Wmin"] ** 2 + fr["H"] ** 2), 2 * reach)) / 2
+            rad = f3(gen.intersect_dia(fr, hollowed)) / 2
             it.add("solid.sphere", center=fr["bbox_c"], radius=rad, operation="intersect", targets=[PART])
             if any(math.dist(q, fr["bbox_c"]) > rad for q in fr["loop"]):
                 # the sphere trims the face's outer loop away where a pick was
@@ -568,7 +568,7 @@ def script_for(item):
     elif orr == "after pattern":
         pattern_holes(it, fr, e)
     prelude(it, to, su, sc, fr, e, g)
-    op_step(it, op, su, sc, fr, e, to)
+    op_step(it, op, su, sc, fr, e, to, orr == "after shell")
     if orr == "before fillet":
         fillet_loop(it, fr, f3(gen.fillet_r(op, "last", e)), to)
     elif orr == "before shell":
