@@ -173,7 +173,7 @@ def body(surface, scale, sheet, rng):
             flat = 2 * math.sqrt(R * R - k * k)
             cut = "the plane Z = %s mm, leaving a flat of Ø%s mm" % (fmt(k), fmt(flat))
         d["text"] = "a sphere of Ø%s mm centred on the origin, with the top removed by %s; the body is the part below that plane" % (fmt(D), cut)
-        d.update(Wmin=flat, hu=flat / 2.0, H=R + k, F="flat cap face", z0=-R)
+        d.update(Wmin=flat, hu=flat / 2.0, H=R + k, F="flat cap face", z0=-R, pole=R - k)
     elif surface == "torus":
         Dm, Dt = {"tiny": (3.6, 1.2), "normal": (60, 16), "huge": (3000, 800),
                   "extreme ratio": (1000, 1)}[scale]
@@ -395,6 +395,12 @@ def op_step(op, b, e, scale, to=None, g=None):
     if op == "thread":
         n, pi, ln = {"tiny": (1.6, 0.35, 1.6), "normal": (12, 1.75, 14), "huge": (100, 6, 120),
                      "extreme ratio": (1, 0.25, 0.5)}[scale]
+        if n >= b["Wmin"]:
+            # the boss is as wide as the face: its side runs on into the body's side, so say where the thread stops
+            return ("Add a Ø%s mm boss, %s mm tall, at %s and model an M%s × %s external thread over the boss only, "
+                    "with a %s mm chamfer at the tip. The boss is as wide as the %s, so its side runs on into the "
+                    "body's side: the thread stops where the boss starts, %s mm below its tip." % (
+                        fmt(n), fmt(ln), C, fmt(n), fmt(pi), fmt(pi), F, fmt(ln)))
         return ("Add a Ø%s mm boss, %s mm tall, at %s and model an M%s × %s external thread over its full length, "
                 "with a %s mm chamfer at the tip." % (fmt(n), fmt(ln), C, fmt(n), fmt(pi), fmt(pi)))
     if op == "sheet-metal flange":
@@ -412,10 +418,18 @@ def op_step(op, b, e, scale, to=None, g=None):
         z = sig(b["z0"] + 0.5 * b["H"], 4)
         return "Split the body with the plane Z = %s mm into two bodies and keep both." % fmt(z)
     if op == "offset face":
-        if to in PADS_ON_FACE:
-            dep = sig(0.5 * sig(0.12 * e))   # half the pad height: the pads stay proud of the moved face
+        dep = offset_dist(e, b["H"], to, b.get("pole"))
         return "Offset the %s outward by %s mm (move the face along its normal, keeping the side faces connected)." % (F, fmt(dep))
     raise ValueError(op)
+
+
+def offset_dist(e, H, to, pole=None):
+    """How far "offset face" moves the face. With pads on it, half the pad height, so the pads stay
+    proud (#117). On a cut sphere the cap can rise only as far as the pole: at most half that room."""
+    dep = sig(0.5 * sig(0.12 * e)) if to in PADS_ON_FACE else sig(0.4 * min(H, e))
+    if pole is not None:
+        dep = min(dep, sig(0.5 * pole))
+    return dep
 
 
 def fillet_r(op, which, e):
@@ -450,7 +464,12 @@ def order_before(order, b, e, op=None, to=None):
 def order_after(order, b, e, op=None, to=None):
     up = " on the upper body (the one with the original top face)" if op == "split" else ""
     if order == "before fillet":
-        return "Fillet %s%s with %s mm." % (b["loop"], up, fmt(fillet_r(op, "last", e)))
+        loop = b["loop"]
+        if op == "boolean intersect" and b["su"] == "torus":
+            # the sphere keeps only a short arc of each circle, near C
+            loop = ("what the sphere leaves of the inner and outer circle edges of the flat cut face "
+                    "(two short arcs, one each side of the sphere's centre)")
+        return "Fillet %s%s with %s mm." % (loop, up, fmt(fillet_r(op, "last", e)))
     if order == "before shell":
         return hollow(b, e, op, to)
     if order == "before pattern":
@@ -738,7 +757,8 @@ def volume_for(row, g, b, e, geo):
 
 # ------------------------------------------------------------------ brief
 FEATURE = {"tangent edges": "boss", "coplanar faces": "pads", "vertex on an edge": "pad",
-           "self-touching body": "cylinders", "thin wall near tolerance": "hole"}
+           "self-touching body": "cylinders", "thin wall near tolerance": "hole",
+           "edge chain around a corner": "notch"}
 
 
 def in_reach(to, b, e, g, reach):
@@ -750,7 +770,14 @@ def in_reach(to, b, e, g, reach):
         return float(g) < reach
     if to in ("coplanar faces", "self-touching body"):
         return float(ex(inset(hu, e))) + s / 2.0 > hu - reach
+    if to == "edge chain around a corner":
+        return s / 2.0 < reach   # the notch reaches s/2 into the face: the blend runs past its back edge
     return False
+
+
+def holes_in_reach(b, e, reach):
+    """True when pattern_step's holes, on the -X side, stand within reach of the face's outer edge."""
+    return b["hu"] - float(ex(inset(b["hu"], e))) - sig(0.1 * e) / 2.0 < reach
 
 
 def brief_for(row):
@@ -778,9 +805,20 @@ def brief_for(row):
             rr, idx = fillet_r(op, "last", e), 3
         if rr is not None and in_reach(to, b, e, g, rr):
             hit = True
-            steps[idx] += (" The %s stands within the fillet's reach, so the fillet runs into it: "
-                           "round the edge up to it, or refuse if that cannot be built." % FEATURE[to]
-                           ).replace("fillet", "chamfer" if op == "chamfer" else "fillet")
+            if to == "edge chain around a corner":
+                note = (" The notch reaches less far into the face than the fillet is wide, so the fillet runs "
+                        "past its back edge: fillet the edge around it, or refuse if that cannot be built.")
+            else:
+                note = (" The %s stands within the fillet's reach, so the fillet runs into it: "
+                        "round the edge up to it, or refuse if that cannot be built." % FEATURE[to])
+            steps[idx] += note.replace("fillet", "chamfer" if op == "chamfer" else "fillet")
+    if orr == "after pattern" and op in ("fillet (constant)", "fillet (variable)", "chamfer"):
+        k = {"fillet (constant)": 0.07, "fillet (variable)": 0.14, "chamfer": 0.1}[op]
+        if holes_in_reach(b, e, k * e):
+            hit = True
+            steps[2] += (" The holes stand within the fillet's reach, so the fillet runs into them: "
+                         "round the edge up to them, or refuse if that cannot be built."
+                         ).replace("fillet", "chamfer" if op == "chamfer" else "fillet")
     steps = [x for x in steps if x]
     text = head + b["text"] + "."
     if len(steps) == 1:
