@@ -894,7 +894,7 @@ function cmpDraw(cv,wrap,get,mark){
     var x=lab+(n%B)*cw,y=Math.floor(n/B)*ch,w=cw-gap,h=ch-gap;
     if(m==="reg"){g.fillStyle=col.card;g.fillRect(x-1,y-1,w+2,h+2);g.strokeStyle=col.fail;g.lineWidth=2;g.strokeRect(x-.5,y-.5,w+1,h+1);
       g.fillStyle=col.fail;g.fillRect(x+1.5,y+1.5,Math.max(w-3,1),Math.max(h-3,1))}
-    else{g.strokeStyle=col.fg;g.lineWidth=1.5;g.strokeRect(x-.25,y-.25,w+.5,h+.5)}}}
+}}
   g.fillStyle=col.mut;g.font="9px system-ui,sans-serif";g.textBaseline="middle";g.textAlign="right";
   for(var r=0;r<B;r+=(ch>=9?1:ch>=5?5:10)){var t=r+1;g.fillText(t<10?"0"+t:""+t,lab-3,r*ch+ch/2)}
   return g2;
@@ -915,8 +915,8 @@ function compare(){
   $("progress-banner").innerHTML=ban;
   var h="";
   h+=any?'<p class="mut">'+st.rerun+' items have been re-run on a newer build'+(newest?", the newest being "+esc(newest):"")+'. Items that were not re-run keep their before-stress-test result on the right.</p>'
-    :'<p><b>Nothing has been re-run yet, so the two grids are identical.</b> When failed items are re-run on a newer build, the right grid updates and the changed cells get an outline.</p>';
-  h+='<p class="legend mut"><span><i class="ol"></i>Changed since before the stress test</span><span><i class="ol r"></i>Regression</span></p>';
+    :'<p><b>Nothing has been re-run yet, so the two grids are identical.</b> When failed items are re-run on a newer build, the right grid updates and any regressions get a red outline.</p>';
+  h+='<p class="legend mut"><span><i class="ol r"></i>Regression</span></p>';
   h+='<div class="cmpcols"><div class="card"><h3>'+esc(C.label)+'</h3><div id="cw1"><canvas id="c1" aria-label="Grid before the stress test"></canvas></div></div>'
     +'<div class="card"><h3>Now'+(newest?" ("+esc(newest)+")":"")+'</h3><div id="cw2"><canvas id="c2" aria-label="Grid now"></canvas></div></div></div>';
   h+='<div class="tot" style="margin-top:12px">'+[["Failing, now passing",st.fixed],["Passing, now failing",st.reg],["Still failing",st.still],["Failed items re-run",st.thenFail-st.notyet+" of "+st.thenFail],["Failed items not yet re-run",st.notyet]].map(function(x){return"<div><span class=mut>"+x[0]+"</span><b>"+x[1]+"</b></div>"}).join("")+"</div>";
@@ -934,7 +934,7 @@ function compare(){
   $("reglist").innerHTML=rl;
   var c1=$("c1"),c2=$("c2"),tip=$("tip");
   var g1=cmpDraw(c1,$("cw1"),function(n){return T[n]},null);
-  var g2=cmpDraw(c2,$("cw2"),function(n){return R[n]},function(n){var m=chg[n];return m==="reg"?"reg":m?"chg":null});
+  var g2=cmpDraw(c2,$("cw2"),function(n){return R[n]},function(n){var m=chg[n];return m==="reg"?"reg":null});
   [[c1,g1],[c2,g2]].forEach(function(p){
     p[0].addEventListener("mousemove",function(e){var n=cmpCell(p[0],p[1],e);if(n<0){tip.style.display="none";return}
       var a=T[n],b=R[n];tip.innerHTML="<b>"+esc(D.items[n][0])+"</b><br>Then: "+esc(a?NAMES[a[0]]:"Not started")+"<br>Now: "+esc(b?NAMES[b[0]]:"Not started")+(BL[n]?" ("+esc(BL[n])+")":"");
