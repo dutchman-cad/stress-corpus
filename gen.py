@@ -765,6 +765,30 @@ def in_reach(to, b, e, g, reach):
     return False
 
 
+DRAFT_DEG = 3.0   # the angle op_step asks for
+
+
+def draft_wall_limit(su, scale, H, w):
+    """Largest draft angle (degrees) of the outer sides that keeps a wall on a body that was
+    hollowed first (a closed void, walls w). The drafted side moves inward by z*tan(a) at height z
+    and the cavity's top rim sits at z = H - w, so it closes the wall where the side reaches that
+    rim. Plane, cylinder and spline bodies have vertical sides: tan(a) = w / (H - w). A cone
+    frustum has its sides offset by w along the normal: the rim radius is
+    r(H - w) - w*sqrt(1 + k^2) and the side reaches it at atan((R1 - rim) / (H - w)) - atan(k)."""
+    if su == "cone":
+        D1, D2, Hc = {"tiny": (4, 2, 3), "normal": (50, 20, 50), "huge": (2000, 800, 2000),
+                      "extreme ratio": (6, 1, 1000)}[scale]
+        R1, R2 = D1 / 2.0, D2 / 2.0
+        k = (R1 - R2) / Hc
+        rim = R1 - k * (Hc - w) - w * math.sqrt(1 + k * k)
+        if rim <= 0:
+            return None
+        return math.degrees(math.atan((R1 - rim) / (Hc - w)) - math.atan(k))
+    if su in ("plane", "cylinder", "spline"):
+        return math.degrees(math.atan(w / (H - w)))
+    return None
+
+
 def brief_for(row):
     op, su, to, gp, sc, orr, pl = row
     rng = random.Random(int(hashlib.sha256(("%d:%s" % (SEED, "|".join(row))).encode()).hexdigest()[:16], 16))
@@ -799,10 +823,17 @@ def brief_for(row):
         text += " " + steps[0]
     else:
         text += " " + " ".join("(%d) %s" % (i + 1, x) for i, x in enumerate(steps))
+    exp = expected_for(row, g, b, e, geom(su, sc, sheet), hit)
+    if op == "draft" and orr == "after shell":
+        w = pf(sig(0.06 * e))
+        lim = draft_wall_limit(su, sc, b["H"], w)
+        if lim is not None and DRAFT_DEG >= lim:
+            exp["refusal_ok"] = True
+            text += (" A draft past about %s\u00b0 closes this %s mm wall, so a refusal is also correct."
+                     % (("%.3g" % lim), fmt(w)))
     pt = placement_text(pl)
     if pt:
         text += " " + pt
-    exp = expected_for(row, g, b, e, geom(su, sc, sheet), hit)
     return obj, text, exp
 
 
