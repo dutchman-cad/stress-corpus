@@ -290,11 +290,12 @@ def prelude(it, to, su, sc, fr, e, g):
                operation="new", body_name="Pad")
         it.add("solid.move", bodies=["Pad"], axis=[0.0, 0.0, 1.0], angle="45 deg", origin=[xc, cy, z])
         it.add("solid.combine", target=PART, tools=["Pad"], operation="join")
-        if g < 0:
-            # the corner pokes |g| beyond the edge: the loop's two pad edges are |g| sqrt 2 long, under the
-            # tolerance, so a point cannot pick them apart from the outer edge
-            fr["loop_unscripted"] = "fillet of a loop with sub-tolerance pad edges"
-        split_loop(fr, [], plus_x=True)
+        # the corner pokes |g| beyond the edge (g < 0): the loop runs in round the pad's base, so pick its four
+        # sides at their middles, s / 2 from the corners and well inside the face (the bits of the pad's sides
+        # beyond the edge are |g| sqrt 2 long, under the tolerance, but they are not on the face)
+        q = S / (2 * math.sqrt(2))
+        split_loop(fr, [[xc + dx, cy + dy, fz] for dx, dy in ((q, -q), (-q, -q), (-q, q), (q, q))] if g < 0 else [],
+                   plus_x=True)
     elif to == "thin wall near tolerance":
         x = F(gen.fd(gen.D(fr["hu"]) - g - gen.D(s) / 2))
         cyl(it, S / 2, dd, cx + x, cy, fz, not out, "cut")
@@ -368,6 +369,42 @@ def split_loop(fr, extra, plus_x):
     fr["loop"] = loop + extra
 
 
+def bent_loop(fr, how, x=None, to=None):
+    """The face's outer loop after the sheet is bent up 90 deg toward +X: its picks, moved with the sheet.
+    The top face (Z = T) is the bend's inside, so its loop is the top side's: the flat part's edges, then the
+    edges of the bend's inner face and of the bent part's inner face (tangent to them, so they chain), to
+    the bent part's far edge. Inside radius T, K-factor 0.44, as the rule."""
+    T, A = fr["T"], fr["A"]
+    if how == "fold":
+        # the line X = x sits in the middle of the bend (sheet.fold's centerline): the bend takes up its
+        # neutral length, BA = pi / 2 (T + 0.44 T), half either side; the part beyond turns up about the
+        # axis Y through (x - BA / 2, 2 T), and its inner face is X = x - BA / 2 + T, from Z = 2 T up
+        ba = math.pi / 2 * (T + 0.44 * T)
+        xt = x - ba / 2
+        def move(q):
+            if q[0] <= xt:
+                return q
+            if q[0] >= xt + ba:
+                return [xt + T, q[1], 2 * T + q[0] - xt - ba]
+            phi = (q[0] - xt) / (T + 0.44 * T)  # the neutral length along the bend, as its angle
+            return [xt + T * math.sin(phi), q[1], 2 * T - T * math.cos(phi)]
+    else:
+        # sheet.flange's defaults: the outer virtual sharp on the edge, so the flange's outer face is X = A / 2,
+        # its inner face X = A / 2 - T, its far edge fh above the bottom face, and the flat part stops at
+        # X = A / 2 - 2 T, where the bend starts; the +X edge becomes the flange's far edge
+        if to in ("tangent edges", "vertex on an edge"):
+            # the boss or pad stands at the +X edge, within the 2 T the bend takes up: where it goes is not known
+            fr["loop_unscripted"] = "blend of a loop whose prelude feature is in the flange's bend"
+        def move(q):
+            if q[0] <= A / 2 - 2 * T:
+                return q
+            if q[0] == A / 2:
+                return [A / 2 - T, q[1], fr["fh"]]
+            fr["loop_unscripted"] = "blend of a loop whose prelude feature is in the flange's bend"
+            return q
+    fr["loop"] = [move(q) for q in fr["loop"]]
+
+
 def loop_picks(fr):
     if fr.get("loop_unscripted"):
         raise Unsupported(fr["loop_unscripted"])
@@ -439,11 +476,12 @@ def op_step(it, op, su, sc, fr, e, to, hollowed=False):
     elif op == "fillet (variable)":
         # r at the loop's +X point, rising linearly to 2 r at the opposite point (halfway round), and back
         if su == "torus":
-            # each of the two loops from its own +X point (the ring's inner and outer circle)
-            if len(loop_picks(fr)) != 2:
-                raise Unsupported("variable fillet of a torus loop that the prelude splits")
-            for q, xs in zip(loop_picks(fr), (cx - fr["hu"], cx + fr["hu"])):
-                it.add("solid.fillet", edges=[q], radius=r, type="variable", radius2=r,
+            # each of the two loops from its own +X point (the ring's inner and outer circle). A prelude at +X
+            # cuts into the outer circle: its picks come after the two circles' and go with the outer loop,
+            # one variable fillet from the +X point as on the other faces
+            picks = loop_picks(fr)
+            for q, xs in zip(([picks[0]], picks[1:]), (cx - fr["hu"], cx + fr["hu"])):
+                it.add("solid.fillet", edges=q, radius=r, type="variable", radius2=r,
                        start=[xs, 0.0, fz], mid=[[0.5, f3(2 * r)]])
         else:
             it.add("solid.fillet", edges=loop_picks(fr), radius=r, type="variable", radius2=r,
@@ -515,17 +553,32 @@ def op_step(it, op, su, sc, fr, e, to, hollowed=False):
         z = F(gen.fmt(gen.sig(fr["z0"] + 0.5 * fr["H"], 4)))
         it.add("solid.split_body", body=PART, plane={"origin": [0.0, 0.0, z], "normal": [0.0, 0.0, 1.0]})
         it.bodies.append(PART + " (1)")
+    elif op == "sheet-metal flange" and su == "spline":
+        # along the stretch of the outline from the -45 deg point to the +45 deg point, through the +X point:
+        # SolidCraft flanges whole edges, so first split the outline there, with the vertical plane through the
+        # two points (it meets the outline only at them), then flange the two pieces either side of +X, each
+        # picked halfway along its spline segment
+        sp, T = fr["spline"], fr["T"]
+        a, b = sp.p[7], sp.p[1]
+        L = math.hypot(b[0] - a[0], b[1] - a[1])
+        mids = [sp.at(7, 0.5), sp.at(0, 0.5)]
+        it.add("solid.split_face", faces=[[q[0], q[1], T / 2] for q in mids], body=PART,
+               plane={"origin": [a[0], a[1], 0.0], "normal": [(b[1] - a[1]) / L, -(b[0] - a[0]) / L, 0.0]})
+        it.add("sheet.flange", type="edge", edges=[[q[0], q[1], T] for q in mids], height="%r mm" % fr["fh"],
+               angle="90 deg")
+        # where a flange along a curved edge would put the loop is not known
+        fr["loop_unscripted"] = "blend of a loop after a flange along a curved edge"
     elif op == "sheet-metal flange":
         # fh tall, 90 deg up, along the +X edge (picked a quarter along: a feature may sit at its middle)
         it.add("sheet.flange", type="edge", edges=[[fr["A"] / 2, -fr["B"] / 4, fr["T"]]], height="%r mm" % fr["fh"],
                angle="90 deg")
-        fr["loop_unscripted"] = "blend of a loop after the sheet is bent"
+        bent_loop(fr, "flange", to=to)
     elif op == "sheet-metal bend":
         # fold the part beyond X = x up 90 deg about the line X = x, inside radius T (the rule's K 0.44)
         x = f3(gen.sig(0.2 * fr["A"]))
         it.add("sheet.fold", points=[[x, -fr["B"], fr["T"]], [x, fr["B"], fr["T"]]], angle="90 deg",
                radius="%r mm" % fr["T"])
-        fr["loop_unscripted"] = "blend of a loop after the sheet is bent"
+        bent_loop(fr, "fold", x)
     elif op == "offset face":
         if to in gen.PADS_ON_FACE:
             dep = f3(gen.sig(0.5 * gen.sig(0.12 * e)))  # half the pad height: the pads stay proud (#117)
@@ -554,8 +607,6 @@ def place(it, placement):
 def script_for(item):
     op, su, to, sc, orr = item["operation"], item["surface"], item["topology"], item["scale"], item["order"]
     sheet = op.startswith("sheet-metal")
-    if sheet and op == "sheet-metal flange" and su != "plane":
-        raise Unsupported("flange along part of a spline edge")
     g = gen.GAPS.get(item["gap"])
     it = Item()
     fr = body(it, su, sc, sheet)
