@@ -348,10 +348,10 @@ def hole_row(it, fr, x, d, dep, p):
     it.add("solid.pattern.rectangular", features=[name], dir1=[0.0, 1.0, 0.0], count1=3, spacing1=p)
 
 
-def pattern_holes(it, fr, e):
+def pattern_holes(it, fr, e, su):
     """gen.pattern_step."""
     d, p, dep = f3(gen.sig(0.1 * e)), f3(gen.sig(0.15 * e)), f3(gen.sig(0.4 * min(fr["H"], e)))
-    hole_row(it, fr, fr["cx"] - F(gen.ex(gen.inset(fr["hu"], e))), d, dep, p)
+    hole_row(it, fr, fr["cx"] - F(gen.ex(gen.row_inset(su, fr["hu"], e))), d, dep, p)
 
 
 def split_loop(fr, extra, plus_x):
@@ -465,7 +465,7 @@ def op_step(it, op, su, sc, fr, e, to, hollowed=False):
         # counts them), p apart along an arc of radius 4 p in the face that leaves C toward +X and curves
         # toward +Y; solid.pattern.path's distance spans the first hole to the last
         name = it.name("Hole")
-        cyl(it, d / 2, dep, cx, cy, fz, not out, "cut", name=name)
+        cyl(it, d / 2, f3(gen.path_hole_depth(su, fr["H"], e)), cx, cy, fz, not out, "cut", name=name)
         path = sketch([cx, cy, fz], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
         R = f3(4 * p)
         it.add("sketch.arc.center_point", center=[0.0, R], start=[0.0, 0.0], end=[R, R], id="arc")
@@ -491,8 +491,18 @@ def op_step(it, op, su, sc, fr, e, to, hollowed=False):
     elif op == "boolean intersect":
         if su == "torus":
             # gen.py: a sphere of 1.2 Wmin centred on the point C of the ring (#106)
-            it.add("solid.sphere", center=[cx, cy, fz], radius=f3(1.2 * fr["Wmin"]) / 2,
-                   operation="intersect", targets=[PART])
+            rad = f3(1.2 * fr["Wmin"]) / 2
+            it.add("solid.sphere", center=[cx, cy, fz], radius=rad, operation="intersect", targets=[PART])
+            # the sphere keeps only the piece of the ring about C, and of each circle of the flat face an
+            # arc either side of +X: a pick the sphere removed moves to the middle of its circle's arc on
+            # the -Y side (the seam and the prelude's features are at +X and toward +Y)
+            def kept(q):
+                if math.dist(q, [cx, cy, fz]) <= rad:
+                    return q
+                rho = math.hypot(q[0], q[1])
+                th = -0.5 * math.acos((rho * rho + cx * cx - rad * rad) / (2 * rho * cx))
+                return [rho * math.cos(th), rho * math.sin(th), q[2]]
+            fr["loop"] = [kept(q) for q in fr["loop"]]
         else:
             if fr["bbox_c"] is None:
                 raise Unsupported("sphere at the bounding-box centre of a spline body")
@@ -566,7 +576,7 @@ def script_for(item):
     elif orr == "after shell":
         it.add("solid.shell", faces=[], thickness=f3(gen.sig(0.06 * e)), body=PART)
     elif orr == "after pattern":
-        pattern_holes(it, fr, e)
+        pattern_holes(it, fr, e, su)
     prelude(it, to, su, sc, fr, e, g)
     op_step(it, op, su, sc, fr, e, to, orr == "after shell")
     if orr == "before fillet":
@@ -574,7 +584,7 @@ def script_for(item):
     elif orr == "before shell":
         it.add("solid.shell", faces=[], thickness=f3(gen.sig(0.06 * e)), body=PART)
     elif orr == "before pattern":
-        pattern_holes(it, fr, e)
+        pattern_holes(it, fr, e, su)
     place(it, item["placement"])
     return {"commands": it.cmds}
 

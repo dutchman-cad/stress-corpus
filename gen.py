@@ -216,6 +216,14 @@ def inset(hu, e):
     return hu - 0.1 * e if hu <= 1.2 * e else 0.6 * hu
 
 
+def row_inset(su, hu, e):
+    """Offset toward -X, from the local origin, for the row of three holes an order step cuts.
+    A spline outline narrows toward its -X point: at hu - 0.1 e the hole at Y = -p breaks out
+    through the side wall there, so on a spline outline the row sits 0.6 hu out, where the outline
+    is wide enough for all three holes."""
+    return 0.6 * hu if su == "spline" else inset(hu, e)
+
+
 def D(x):
     """Exact decimal for a float that was built from short decimal numbers."""
     return Decimal(repr(round(float(x), 9)))
@@ -320,10 +328,19 @@ def prelude(topo, b, e, scale, g):
 def pattern_step(b, e):
     F, C = b["F"], b["C"]
     d, p, dep = sig(0.1 * e), sig(0.15 * e), sig(0.4 * min(b["H"], e))
-    u = ex(inset(b["hu"], e))
+    u = ex(row_inset(b["su"], b["hu"], e))
     return ("cut a \u00d8%s mm hole, %s mm deep, in the %s %s mm from %s toward -X, then repeat it "
             "in a linear pattern of 3 along Y at %s mm pitch, so the holes are at Y = -%s, 0 and +%s mm" % (
                 fmt(d), fmt(dep), F, u, C, fmt(p), fmt(p), fmt(p)))
+
+
+def path_hole_depth(su, H, e):
+    """Depth of the holes a pattern along a path cuts. The path leaves C toward +X and its last hole
+    stands 0.44 e from C. On the half torus that is 0.83 of the tube's radius from the centre circle,
+    and the tube narrows above the flat face: a hole of the usual depth breaks out through the tube's
+    side there. Half that depth keeps every hole inside the tube at every scale."""
+    dep = sig(0.4 * min(H, e))
+    return sig(dep / 2.0) if su == "torus" else dep
 
 
 # Topologies whose prelude stands pads, bosses or cylinders on the top face.
@@ -387,7 +404,8 @@ def op_step(op, b, e, scale, to=None, g=None, hollowed=False):
             fmt(d), fmt(dep), fmt(1.5 * d), C))
     if op == "pattern (along a path)":
         return ("Cut a Ø%s mm hole %s mm deep at %s, then repeat it 4 times, %s mm apart measured along a path, following an arc "
-                "in the %s that curves toward +Y with a %s mm radius." % (fmt(d), fmt(dep), C, fmt(p), F, fmt(4 * p)))
+                "in the %s that curves toward +Y with a %s mm radius." % (
+                    fmt(d), fmt(path_hole_depth(b["su"], b["H"], e)), C, fmt(p), F, fmt(4 * p)))
     if op == "mirror":
         return ("Add a %s × %s mm square boss, %s mm tall, centred %s mm from %s toward +Y, then mirror it across the XZ plane through the face centre." % (
             fmt(d), fmt(d), fmt(dep), fmt(1.5 * d), C))
@@ -462,6 +480,11 @@ def order_before(order, b, e, op=None, to=None):
 def order_after(order, b, e, op=None, to=None):
     up = " on the upper body (the one with the original top face)" if op == "split" else ""
     if order == "before fillet":
+        if op == "boolean intersect" and b["su"] == "torus":
+            # the sphere about C keeps only a short piece of the ring: what is left of the two circles
+            # is an arc of each, not a closed loop
+            return ("Fillet what the sphere leaves of both edge loops of the %s (an arc of the inner circle "
+                    "and an arc of the outer circle) with %s mm." % (b["F"], fmt(fillet_r(op, "last", e))))
         return "Fillet %s%s with %s mm." % (b["loop"], up, fmt(fillet_r(op, "last", e)))
     if order == "before shell":
         return hollow(b, e, op, to)
@@ -639,7 +662,7 @@ def volume_for(row, g, b, e, geo):
     # ---- order step
     d, p, dep = pf(sig(0.1 * e)), pf(sig(0.15 * e)), pf(sig(0.4 * min(H, e)))
     if orr in ("before pattern", "after pattern"):
-        u = float(ex(inset(hu, e)))
+        u = float(ex(row_inset(su, hu, e)))
         V -= 3 * math.pi * d * d / 4 * dep
         feats.append(([(-u, y, d / 2.0) for y in (-p, 0.0, p)], True))
     elif orr in ("before shell", "after shell"):
