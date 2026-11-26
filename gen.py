@@ -174,7 +174,8 @@ def body(surface, scale, sheet, rng):
             cut = "the plane Z = %s mm, leaving a flat of Ø%s mm" % (fmt(k), fmt(flat))
         d["text"] = "a sphere of Ø%s mm centred on the origin, with the top removed by %s; the body is the part below that plane" % (fmt(D), cut)
         d.update(Wmin=flat, hu=flat / 2.0, H=R + k, F="flat cap face", z0=-R,
-                 rims=[(R, 0.0), (0.0, -R), (flat / 2.0, k)])
+                 rims=[(R, 0.0), (0.0, -R), (flat / 2.0, k)],
+                 pole=R - k, edge_deg=math.degrees(math.asin(flat / 2.0 / R)))
     elif surface == "torus":
         Dm, Dt = {"tiny": (3.6, 1.2), "normal": (60, 16), "huge": (3000, 800),
                   "extreme ratio": (1000, 1)}[scale]
@@ -343,6 +344,13 @@ def intersect_dia(b, hollowed):
     return dia
 
 
+def offset_dist(b, e, to):
+    """How far an offset face step moves the face outward."""
+    if to in PADS_ON_FACE:
+        return sig(0.5 * sig(0.12 * e))   # half the pad height: the pads stay proud of the moved face
+    return sig(0.4 * min(b["H"], e))
+
+
 def op_step(op, b, e, scale, to=None, g=None, hollowed=False):
     F, C, loop = b["F"], b["C"], b["loop"]
     tor = b["su"] == "torus"   # its flat face faces -Z, the body is above it
@@ -424,9 +432,8 @@ def op_step(op, b, e, scale, to=None, g=None, hollowed=False):
         z = sig(b["z0"] + 0.5 * b["H"], 4)
         return "Split the body with the plane Z = %s mm into two bodies and keep both." % fmt(z)
     if op == "offset face":
-        if to in PADS_ON_FACE:
-            dep = sig(0.5 * sig(0.12 * e))   # half the pad height: the pads stay proud of the moved face
-        return "Offset the %s outward by %s mm (move the face along its normal, keeping the side faces connected)." % (F, fmt(dep))
+        return "Offset the %s outward by %s mm (move the face along its normal, keeping the side faces connected)." % (
+            F, fmt(offset_dist(b, e, to)))
     raise ValueError(op)
 
 
@@ -753,6 +760,9 @@ FEATURE = {"tangent edges": "boss", "coplanar faces": "pads", "vertex on an edge
            "self-touching body": "cylinders", "thin wall near tolerance": "hole"}
 
 
+ROUND_FACE = ("cylinder", "cone", "sphere")   # the face the features stand on is a disc about C
+
+
 def in_reach(to, b, e, g, reach):
     """True when the prelude feature stands within reach of the face's outer edge,
     so a fillet or chamfer of that edge runs into it."""
@@ -761,11 +771,67 @@ def in_reach(to, b, e, g, reach):
     if to in ("tangent edges", "vertex on an edge", "thin wall near tolerance"):
         return float(g) < reach
     if to in ("coplanar faces", "self-touching body"):
-        return float(ex(inset(hu, e))) + s / 2.0 > hu - reach
+        u0 = float(ex(inset(hu, e)))
+        far = u0 + s / 2.0
+        if b["su"] in ROUND_FACE:
+            # the face is a disc of radius hu about C: measure to its edge along the radius
+            if to == "coplanar faces":
+                far = math.hypot(u0 + s / 2.0, 1.5 * s)      # the second pad's outer +Y corner
+            else:
+                far = math.hypot(u0, (s + float(g)) / 2.0) + s / 2.0
+        return far > hu - reach
     return False
 
 
 DRAFT_DEG = 3.0   # the angle op_step asks for
+SMOOTH_DEG = 0.1  # two faces that meet within this angle of tangent leave no edge to round or chamfer
+BLENDS = ("fillet (constant)", "fillet (variable)", "chamfer")
+
+
+def draft_closes_at(su, scale):
+    """Height (mm above the bottom face) where a DRAFT_DEG draft about the bottom face brings the
+    side of a cylinder or cone frustum to the axis, or None when that is above the top face (or the
+    body is not round). The drafted side's radius at height z is R1 - z*tan(atan(k) + a), with k the
+    cone's own slope (0 for a cylinder): below the top face, the body ends in a point there and the
+    top face is gone."""
+    if su == "cylinder":
+        Dm, H = {"tiny": (3, 4), "normal": (40, 60), "huge": (1200, 2400), "extreme ratio": (1, 1000)}[scale]
+        R1, k = Dm / 2.0, 0.0
+    elif su == "cone":
+        D1, D2, H = {"tiny": (4, 2, 3), "normal": (50, 20, 50), "huge": (2000, 800, 2000),
+                     "extreme ratio": (6, 1, 1000)}[scale]
+        R1, k = D1 / 2.0, (D1 - D2) / 2.0 / H
+    else:
+        return None
+    z = R1 / math.tan(math.atan(k) + math.radians(DRAFT_DEG))
+    return z if z <= H else None
+
+
+def impossible(row, b, e, walled=False):
+    """Sentences for a brief whose steps ask for something that cannot be built as written, so a
+    refusal is also correct. Each one is geometry from the item's own numbers. walled: the brief
+    already says the draft closes a hollowed body's wall (at a smaller angle still)."""
+    op, su, to, gp, sc, orr, pl = row
+    out = []
+    if (su == "sphere" and b["edge_deg"] < SMOOTH_DEG
+            and (op in BLENDS or orr in ("before fillet", "after fillet"))
+            and not (op == "shell" and orr == "before fillet")):
+        # the cap's edge is the loop every fillet and chamfer step works on (a shell that removes the
+        # cap first leaves a rim instead, square to the sphere, and that edge is sharp)
+        out.append("The flat cap face meets the sphere at only %s\u00b0, so the edge between them is smooth and "
+                   "there is nothing to round or chamfer: a refusal is also correct." % ("%.3g" % b["edge_deg"]))
+    if op == "chamfer" and orr == "after fillet":
+        out.append("Step (1) already rounded this loop: the faces along the rounded edge meet tangentially, "
+                   "so a chamfer has nothing to cut there and a refusal is also correct.")
+    if op == "draft" and not walled:
+        z = draft_closes_at(su, sc)
+        if z is not None:
+            out.append("A %s\u00b0 draft brings the side to the axis %s mm above the bottom face, so the body "
+                       "ends there and never reaches the %s: a refusal is also correct." % (fmt(DRAFT_DEG), fmt(z), b["F"]))
+    if op == "offset face" and su == "sphere" and offset_dist(b, e, to) >= b["pole"]:
+        out.append("The sphere's pole is only %s mm above the %s, so the sphere ends before it reaches the "
+                   "moved face: a refusal is also correct." % (fmt(b["pole"]), b["F"]))
+    return out
 
 
 def draft_wall_limit(su, scale, H, w):
@@ -824,13 +890,18 @@ def brief_for(row):
     else:
         text += " " + " ".join("(%d) %s" % (i + 1, x) for i, x in enumerate(steps))
     exp = expected_for(row, g, b, e, geom(su, sc, sheet), hit)
+    walled = False
     if op == "draft" and orr == "after shell":
         w = pf(sig(0.06 * e))
         lim = draft_wall_limit(su, sc, b["H"], w)
         if lim is not None and DRAFT_DEG >= lim:
+            walled = True
             exp["refusal_ok"] = True
             text += (" A draft past about %s\u00b0 closes this %s mm wall, so a refusal is also correct."
                      % (("%.3g" % lim), fmt(w)))
+    for why in impossible(row, b, e, walled):
+        exp["refusal_ok"] = True
+        text += " " + why
     pt = placement_text(pl)
     if pt:
         text += " " + pt

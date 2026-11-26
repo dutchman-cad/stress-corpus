@@ -61,7 +61,7 @@ Combinations that cannot be built (for example a sheet-metal bend on a sphere) a
 
 - `volume_mm3`: the total volume of all bodies, only when it is closed form for that exact item (1,070 items so far). If the field is missing, no value is claimed.
 - `bodies`: how many separate bodies the finished part has.
-- `refusal_ok`: true when a wall or gap in the item is under the kernel tolerance of 1e-5 mm, so refusing to build it is acceptable. Also true for a draft of a body that was hollowed first when the angle is at or above the largest one that keeps a wall (the brief names it), because the drafted side then closes the wall.
+- `refusal_ok`: true when a wall or gap in the item is under the kernel tolerance of 1e-5 mm, so refusing to build it is acceptable. Also true for a draft of a body that was hollowed first when the angle is at or above the largest one that keeps a wall (the brief names it), because the drafted side then closes the wall. And true when a step cannot be built as written, which the brief then says: a fillet or chamfer of the extreme-ratio sphere's cap edge (the cap meets the sphere at 0.057°, so the edge is smooth), a chamfer of a loop the step before it rounded, a 3° draft that brings the side of the extreme-ratio cylinder or cone to the axis below the top face, and an offset that moves a sphere's cap past the pole.
 
 ### Scripts for SolidCraft
 
