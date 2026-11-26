@@ -43,6 +43,24 @@ class CheckResults(unittest.TestCase):
         self.assertTrue(any("appears twice" in e for e in errs))
         self.assertTrue(any("not valid JSON" in e for e in errs))
 
+    def test_a_rerun_of_one_build_on_two_builds(self):
+        # a hang re-run on the build itself, then a re-check on a newer build: both re-check
+        # the same build, on different builds, so neither is a duplicate; twice on one is
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "r.jsonl")
+            with open(GOOD) as g:
+                base = json.loads(g.readline())
+            lines = [dict(base, version="b1", build="b1", rerun_of="b1"),
+                     dict(base, version="b2", build="b2", rerun_of="b1")]
+            with open(p, "w") as w:
+                w.write("".join(json.dumps(x) + "\n" for x in lines))
+            errs, _ = check_results.check_file(p, ITEMS)
+            self.assertFalse(any("appears twice" in e for e in errs), errs)
+            with open(p, "a") as w:
+                w.write(json.dumps(lines[1]) + "\n")
+            errs, _ = check_results.check_file(p, ITEMS)
+        self.assertTrue(any("re-checking b1 on b2" in e for e in errs), errs)
+
     def test_main_exit_codes(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(check_results.main([GOOD]), 0)
